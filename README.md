@@ -12,10 +12,12 @@
 
 | 技能 | face | scope | 管什么 |
 |---|---|---|---|
-| [skill-atlas](skills/skill-atlas/SKILL.md) | `quality` | `method` | 用坐标给 skill 定位、判重叠、拆分、配组 |
-| [make-skill](skills/make-skill/SKILL.md) | `quality` | `subject` | 写一份 skill 的合格线与写法；事实带日期 |
-| [skill-lifecycle](skills/skill-lifecycle/SKILL.md) | `process` | `method` | 要不要做、怎么拆、何时升版本与发布、谁批准 |
-| [skit](skills/skit/SKILL.md) | `execution` | `subject` | 装卸查询的命令、验证装成功、`$_S` 引用 |
+| [skill-atlas](skills/skill-atlas/SKILL.md) | `quality` | `method` | 定位、判重叠、拆分、配组；正文按面长出来的标准 |
+| [skill-writing](skills/skill-writing/SKILL.md) | `quality` | `subject` | 写一份 skill：字段契约、描述、正文、引用的合格线与写法 |
+| [make-skill](skills/make-skill/SKILL.md) | `process` | `method` | 制作流程：决定、提取、拆分、验收与查询集、发布、维护 |
+| [skit](skills/skit/SKILL.md) | `execution` | `subject` | 安装、检查、导出；装完验什么 |
+
+`skill-atlas` 定义标准，`skill-writing` 按标准写，`make-skill` 管步骤与关口，`skit` 管动作。
 
 ## 结构
 
@@ -24,9 +26,9 @@
 | `THEORY.md` | 内容坐标：面与作用域 | 写 skill 的人、审 skill 的 agent |
 | `docs/placement-audit.md` | 归位审计：现有材料能否被三个面放下 | 维护理论的人 |
 | `AGENTS.md` | 本仓库的常驻约定 | 任何在本仓库工作的 agent |
-| `skills/skill-atlas/` | 内容定位 | 安装者 |
-| `skills/make-skill/` | 写一份 skill | 安装者 |
-| `skills/skill-lifecycle/` | 生命周期与授权 | 安装者 |
+| `skills/skill-atlas/` | 坐标与标准 | 安装者 |
+| `skills/skill-writing/` | 写一份 skill | 安装者 |
+| `skills/make-skill/` | 制作流程 | 安装者 |
 | `skills/skit/` | 安装与验证命令 | 安装者 |
 
 ## 这套东西不是什么
