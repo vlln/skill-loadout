@@ -6,10 +6,10 @@ description: >
   or needs re-verification. Owns the sequence, the decision points, and who
   authorizes each step; it does not define what a good skill looks like, nor how
   to install or run one.
-face: process
-scope: method
 license: MIT
 metadata:
+  face: process
+  scope: method
   author: vlln
   version: "2.0.0"
 ---

@@ -6,10 +6,10 @@ description: >
   path references for bundled scripts. Covers where skills are stored, how they
   reach agent directories, and what skit does and does not validate. Not for
   writing a skill or deciding when to publish one.
-face: execution
-scope: subject
 license: MIT
 metadata:
+  face: execution
+  scope: subject
   author: vlln
   version: "2.0.0"
 ---
@@ -56,17 +56,9 @@ skit export <name>             # 导出到指定目录
 3. 全程没有 warning；有 warning 就按内容问题先修，别把警告当成功。
 4. 发布前在干净环境照 README 走一遍：只有 README 的指令，能装成。
 
-## 引用包内文件：`$_S`
+## 引用包内文件
 
-文档里写 `$_S/scripts/run.sh`，不写裸相对路径——agent 的工作目录不一定是技能目录。
-
-`$_S` 是**文档占位符**，不是预置环境变量。实际执行时先定成绝对路径再用：
-
-```sh
-export _S="/absolute/path/to/skill"; $_S/scripts/run.sh
-```
-
-`_S`（不带美元符）才是变量名；正文里第一次出现时说明这一点，之后可直接引用。
+按官方规范写相对 skill 根目录的路径（如 `scripts/run.sh`）。某些 host 会以当前工作目录解析相对路径而不是 skill 根；遇到这种 host，在调用处先解析成绝对路径再执行，不要因此改写技能内的引用格式。写法规则见质量面的 `make-skill`。
 
 ## 不负责
 

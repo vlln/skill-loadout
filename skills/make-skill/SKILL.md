@@ -1,38 +1,47 @@
 ---
 name: make-skill
 description: >
-  Use when writing, rewriting, or judging one Agent Skill: its frontmatter
-  contract, its trigger description, its body structure, and how to prove it
-  works. Not for deciding whether a skill is worth building, splitting one into
-  several, versioning or publishing it, or running the installer — those belong
-  to the process and execution faces of the same task.
-face: quality
-scope: subject
+  Use when writing, rewriting, or judging one Agent Skill: frontmatter contract,
+  trigger description, body structure, file references, and how to prove it
+  works. Covers the Agent Skills specification plus this project's extensions
+  (content face, scope, fact-versus-rule separation). Not for deciding whether to
+  build a skill, splitting one, versioning or publishing it, or running the
+  installer.
 license: MIT
 metadata:
+  face: quality
+  scope: subject
   author: vlln
-  version: "2.0.0"
+  version: "2.1.0"
 ---
 
 # 写一份 skill
 
-这份 skill 只回答两件事：**什么样算合格**，**怎么写更好**。它不回答要不要做、什么时候发、装在哪里。
+这份 skill 只回答两件事：**什么样算合格**，**怎么写更好**。事实与规范分开写，事实带核对日期。
 
-## 事实：它是什么，怎么被加载
+## 事实：官方规范怎么说
 
-- 一个 skill 是一个目录，至少含 `SKILL.md`；可选 `scripts/`、`references/`、`assets/`。
-- 加载分三层，成本递增：启动时只读 `name` + `description`（每份约 100 tokens）；激活时读整个正文（自设目标：500 行、5,000 tokens 以内）；`references/`、`scripts/`、`assets/` 只在指令要求时读或运行。
-- **宿主是最终权威。** 发现根、支持的字段、截断长度都随宿主不同且在变。下面的事实标注核对日期（2026-10-19）；换宿主或升级后重核，不要凭记忆。
-- 可移植的核心字段只有六个：`name`、`description`、`license`、`compatibility`、`metadata`、`allowed-tools`。其余是宿主扩展，用了就失去可移植性。
-- 上面三条来自规范与宿主行为，不是本 skill 的发明；标注日期的原因见下一节最后一条。
+来源：Agent Skills 规范与 skill-creation 指南（`agentskills.io`），核对 **2026-10-19**。宿主是最终权威，换宿主或升级后重核。
+
+| 字段 | 必须 | 约束 |
+|---|---|---|
+| `name` | 是 | 1–64 字符，仅 `a-z0-9-`，首尾及连续连字符禁止，且必须等于父目录名 |
+| `description` | 是 | 1–1024 字符，写清"做什么"和"何时用" |
+| `license` | 否 | 许可名，或指向随包许可文件 |
+| `compatibility` | 否 | 1–500 字符，环境要求；多数 skill 不需要 |
+| `metadata` | 否 | 字符串键值表——客户端自定义属性的**官方位置** |
+| `allowed-tools` | 否 | 空格分隔的预批准工具，实验性，各客户端支持不一 |
+
+- 渐进披露三层：启动只读 `name` + `description`（约 100 tokens/份）；激活读整个正文（建议 <5,000 tokens）；`scripts/`、`references/`、`assets/` 按需加载。正文建议 <500 行。
+- 文件引用用**相对 skill 根目录的路径**，层级保持一层。
+- 官方 `skills-ref validate <dir>` 只校验 frontmatter 与命名，不校验内容质量。
 
 ## 判据：合格线
 
 **frontmatter**
 
-- `name` 与所在目录名一致；1–64 字符，小写字母、数字、连字符，无首尾或连续连字符。
-- `description` 写清"做什么 + 何时用"，≤1024 字符。与宿主追加的触发说明合并后会被截断，所以最关键的用例放最前。
-- YAML 必须从文件第 0 字节开始。BOM 或前置空行会让整份 frontmatter 失效，文件被当成纯指令。
+- 六个字段名照抄规范，不自造顶级字段：自定义内容一律进 `metadata`（严格客户端会拒绝未知顶级字段）。
+- YAML 必须从文件第 0 字节开始：BOM 或前置空行会让整份 frontmatter 失效，文件被当成纯指令。
 - 值里含 `: ` 或 `#` 时加引号。未引号的冒号是最常见的静默失败。
 
 **三角色不互串**
@@ -45,44 +54,58 @@ metadata:
 
 **校验必须能失败**
 
-- 机械检查（frontmatter 可解析、`name` 与目录一致、行数在限内）只证明格式对，不证明能用。
-- 至少做一次负控：故意改坏一处（删掉 `description`、改错 `name`、把两件无关的事塞进一个触发），确认检查会报错。**从不失败的校验不是证据。**
-- 行为验证：拿三句真实请求试触发——两句该命中，一句近邻不该命中。只看"能不能加载"不算验证。
+- 机械校验（`skills-ref validate`、name 与目录一致、行数在限内）只证明格式对，不证明能用。
+- 至少做一次负控：故意改坏一处（删 `description`、改错 `name`、把两件无关事塞进一个触发），确认检查会报错。**从不失败的校验不是证据。**
+- 行为验证：三句真实请求试触发——两句该命中，一句近邻不该命中。
 
-**事实要带来源与日期。** 任何"某某宿主支持 / 最多多少字符 / 现在是最新版"的断言，写上核对日期；否则它比规则先过期。
+**事实带来源与日期**：任何"宿主支持 / 最多多少字符 / 现在是最新版"的断言都标核对日期，否则它比规则先过期。
 
-## 风格：怎么写更好
+## 扩展：本项目加在规范之上的三条
 
-**description**
+规范没规定下面这些；它们是本项目的规矩，用 `metadata` 承载，不改规范的字段语义。
 
-- 用"当……时使用本 skill"的祈使句，写用户想达成的事，不写内部机制。
-- 首句必须能被匹配：把"何时用"放最前，把实现细节留给正文。
-- 点名近邻——写出"不适用"的情形，比堆同义词有效。
-- 一条描述需要 `and` 连接两件无关的工作，就是该拆的信号。
+1. **面与作用域标在 `metadata` 里**，不新增顶级字段：
 
-**正文**
+```yaml
+metadata:
+  face: quality      # process | quality | execution
+  scope: subject     # method | subject | instance
+```
 
-正文只承担五样东西：流程、默认值、脆弱约束、gotchas、校验回环。其余（通用知识、标准工具用法、复述文档）都是上下文税。
+2. **正文形状由面决定**，不套固定的模式菜单（见下一节）。
+3. **事实与规范分开写**：事实单独成段并带日期；规则里不夹"某某支持"这类断言。
 
-常见的五种组织方式，按任务选一种，不要混着堆：
+## 风格：正文按面长出来
 
-| 模式 | 形状 | 适合 |
+先定主面，再决定正文形状——这比"选一种模式"稳定，因为面来自它回答的问题，不来自作者偏好：
+
+| 面 | 正文写什么 | 不写什么 |
 |---|---|---|
-| 工具封装 | 触发词 → 能力 → 指向 `references/` | 包一个 CLI 或 API |
-| 生成器 | 读风格指南 → 套模板 → 按清单校验 | 标准化产物 |
-| 审查器 | 固定流程 + 可替换的检查清单 | 评审、审计 |
-| 反问式 | 目标 → 约束 → 执行，每阶段确认 | 猜测比提问更贵时 |
-| 流水线 | 每阶段产出经校验的中间结果 | 顺序不可乱的多步工作 |
+| `process` | 顺序、关口、谁决定、交接物 | 具体命令、判定细则 |
+| `quality` | 判据、风格、反例、负控 | 何时做、装在哪 |
+| `execution` | 命令、参数、产物、验什么 | 写作判据、审批 |
 
-- 超过 500 行或 5,000 tokens 再拆 `references/`；每个 reference 必须有"何时读它"的指令，否则它永远不会被读。
-- gotcha 的定义是"违反合理假设的具体事实"：写现象、原因、最小修法。写"注意边界"等于没写。
-- 控制力度随脆弱度走：多解可用时讲理并给默认；命令精确、顺序脆弱时钉死。
-- 反模式：把清单当完成标准；用"确保""注意"代替判据；正文里塞安装说明；为凑完整性加文件。
+跨面内容一律写成"不负责什么"并指路，不复述对方规则。
+
+可用的技巧，按需要挑，不是清单：
+
+- **gotchas**：违反合理假设的具体事实——现象、原因、最小修法。放正文，别放深的 reference。
+- **模板**：要固定输出格式时给具体骨架，比散文描述可靠。
+- **清单**：多步且有依赖或关口时给。
+- **校验回环**：做完跑校验，失败就修，通过才继续。
+- **先计划后执行**：批量或破坏性操作，先产出计划，对照事实校验后再执行。
+
+写作口径：
+
+- 只写模型不写就会做错的东西。通用知识、标准工具用法、复述文档都是上下文税。
+- 默认给一个，另给一条后路；不要摆一堆等权选项。
+- 多解可用时讲理并给默认，脆弱处（精确命令、顺序、格式）钉死。
+- 一段讲一件事；判据用"必须 / 不得 / 应当"，不用"注意""确保"。
 
 ## 输出
 
-写完或审完，给出四项：它回答哪个问句、作用域是什么、哪些句子是事实（带来源日期）、哪些是判据与风格。再加一句"不负责什么"，让下一份能接上。
+写完或审完给四项：它回答哪个问句；作用域是什么；哪些句子是事实（带来源日期）；哪些是判据与风格。再加一句"不负责什么"，让下一份接得上。
 
 ## 不负责
 
-要不要做、怎么拆、何时升版本与发布，属于流程面；安装、清单、命令与目录，属于执行面。本文只在必要处提到它们，不复述其规则。
+要不要做、怎么拆、何时升版本与发布属于流程面；安装、清单、命令与目录属于执行面。本文只在必要处点名，不复述其规则。

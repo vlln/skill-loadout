@@ -5,10 +5,10 @@ description: >
   could be swapped, splitting a skill that answers two different questions, or
   assembling a small set of skills that covers process, quality, and execution for
   one kind of task. Also for auditing how a batch of existing skills is distributed.
-face: quality
-scope: method
 license: MIT
 metadata:
+  face: quality
+  scope: method
   author: vlln
   version: "0.1.0"
 ---

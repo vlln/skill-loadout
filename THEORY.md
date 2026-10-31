@@ -94,11 +94,12 @@ skill 变多以后，真正的问题不是数量，是不可比：
 
 ## 标注
 
-`frontmatter` 只加这两行，不加别的：
+两个坐标写在 `metadata` 里，不新增顶级字段——`metadata` 是 Agent Skills 规范给客户端自定义属性的官方位置，顶级自造字段可能被严格客户端拒绝：
 
 ```yaml
-face: quality              # process | quality | execution
-scope: method              # method | subject | instance，或一个可指认的扩展标识
+metadata:
+  face: quality      # process | quality | execution
+  scope: method      # method | subject | instance，或一个可指认的扩展标识
 ```
 
 三条约定：
