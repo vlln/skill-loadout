@@ -8,7 +8,10 @@
 
 **理论已定骨架，开始验证。** [THEORY.md](THEORY.md) 是唯一权威；[docs/placement-audit.md](docs/placement-audit.md) 是对 23 份真实 skill 的归位审计，也是这套坐标第一次被现实检验。
 
-已有一份 skill：[skills/skill-atlas](skills/skill-atlas/SKILL.md)（`face: quality`，`scope: method`）——用坐标给 skill 定位、判重叠、拆分、配组。
+已创建两份 skill：
+
+- [skills/skill-atlas](skills/skill-atlas/SKILL.md)（`face: quality`，`scope: method`）——用坐标给 skill 定位、判重叠、拆分、配组。
+- [skills/make-skill](skills/make-skill/SKILL.md)（`face: quality`，`scope: subject`）——写一份 skill 的合格线与写法；事实带来源日期。
 
 ## 结构
 
@@ -17,7 +20,8 @@
 | `THEORY.md` | 内容坐标：面与作用域 | 写 skill 的人、审 skill 的 agent |
 | `docs/placement-audit.md` | 归位审计：现有材料能否被三个面放下 | 维护理论的人 |
 | `AGENTS.md` | 本仓库的常驻约定 | 任何在本仓库工作的 agent |
-| `skills/skill-atlas/` | 第一份 skill：内容定位 | 安装者 |
+| `skills/skill-atlas/` | 内容定位 | 安装者 |
+| `skills/make-skill/` | 写一份 skill | 安装者 |
 
 ## 这套东西不是什么
 
