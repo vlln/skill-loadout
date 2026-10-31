@@ -6,17 +6,18 @@
 
 ## 当前状态
 
-**理论阶段。** [THEORY.md](THEORY.md) 是唯一权威；skill 集尚未建立。
+**理论已定骨架，开始验证。** [THEORY.md](THEORY.md) 是唯一权威；[docs/placement-audit.md](docs/placement-audit.md) 是对 23 份真实 skill 的归位审计，也是这套坐标第一次被现实检验。
 
-建立顺序：先把理论写清楚、用现有 skill 验证它，再据此产出第一组 skill，最后才谈安装与发布。
+已有一份 skill：[skills/skill-atlas](skills/skill-atlas/SKILL.md)（`face: quality`，`scope: method`）——用坐标给 skill 定位、判重叠、拆分、配组。
 
 ## 结构
 
 | 路径 | 是什么 | 读者 |
 |---|---|---|
 | `THEORY.md` | 内容坐标：面与作用域 | 写 skill 的人、审 skill 的 agent |
+| `docs/placement-audit.md` | 归位审计：现有材料能否被三个面放下 | 维护理论的人 |
 | `AGENTS.md` | 本仓库的常驻约定 | 任何在本仓库工作的 agent |
-| `skills/` | 将来的一组 skill（待建） | 安装者 |
+| `skills/skill-atlas/` | 第一份 skill：内容定位 | 安装者 |
 
 ## 这套东西不是什么
 
