@@ -5,8 +5,7 @@ description: >
   worth making, extracting real material, splitting it, testing its trigger with
   a query set, writing its README, publishing it, and keeping it current. Owns
   the order, the gates, and who authorizes each step. Not for how to write the
-  fields and prose (skill-writing), positioning and overlap (skill-atlas), or
-  installing (skit).
+  fields and prose, how to position a set of skills, or how to install one.
 license: MIT
 metadata:
   face: process
@@ -17,14 +16,14 @@ metadata:
 
 # 制作一个 skill 的流程
 
-这份 skill 管什么时候做哪一步、谁决定、交接什么。写法在 `skill-writing`，定位与重叠在 `skill-atlas`，安装命令在 `skit`。
+这份 skill 管什么时候做哪一步、谁决定、交接什么。
 
 | 阶段 | 产出 | 过关条件 | 谁决定 |
 |---|---|---|---|
 | 0 决定 | 一句话：反复任务 + 知识缺口 | 一段常驻规则不足以替代 | 人，或人明确委托 |
 | 1 提取 | 真实步骤、纠正、输入输出、项目事实 | 有模型猜不到的、来自真实工作的材料 | agent |
 | 2 拆 | 一份，或几份带边界的清单 | 每份都能一句话说清何时用 | agent |
-| 3 写 | `SKILL.md` 初稿 | 交 `skill-writing` 的判据 | agent |
+| 3 写 | `SKILL.md` 初稿 | 字段与文字达到合格线 | agent |
 | 4 验收 | 校验结果 + 查询集测试 | 负控会失败；该中中，近邻不中 | agent，异常交人 |
 | 5 发布 | 可安装的源 + README | 干净环境照 README 能装成 | **人** |
 | 6 维护 | 版本与复查记录 | 事实未过期，或已更新 | agent 提议，人确认发布 |
@@ -55,7 +54,7 @@ metadata:
 
 ## 3 写
 
-交给 `skill-writing`。本阶段只定两件事：它回答哪个问句（主面）、它在讲什么东西（作用域）。定不出来就先别写。
+本阶段只定两件事：它回答哪个问句（主面）、它在讲什么东西（作用域）。定不出来就先别写。
 
 ## 4 验收：让触发可测
 
@@ -82,4 +81,4 @@ metadata:
 
 ## 不负责
 
-写法与字段 → `skill-writing`；定位、重叠与配组 → `skill-atlas`；安装、清单、命令 → `skit`。
+写法与字段的合格性、定位与重叠判断、安装与清单命令，都不在本文范围内。
