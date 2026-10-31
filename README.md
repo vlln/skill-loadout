@@ -8,10 +8,14 @@
 
 **理论已定骨架，开始验证。** [THEORY.md](THEORY.md) 是唯一权威；[docs/placement-audit.md](docs/placement-audit.md) 是对 23 份真实 skill 的归位审计，也是这套坐标第一次被现实检验。
 
-已创建两份 skill：
+已创建四份 skill，覆盖三个面：
 
-- [skills/skill-atlas](skills/skill-atlas/SKILL.md)（`face: quality`，`scope: method`）——用坐标给 skill 定位、判重叠、拆分、配组。
-- [skills/make-skill](skills/make-skill/SKILL.md)（`face: quality`，`scope: subject`）——写一份 skill 的合格线与写法；事实带来源日期。
+| 技能 | face | scope | 管什么 |
+|---|---|---|---|
+| [skill-atlas](skills/skill-atlas/SKILL.md) | `quality` | `method` | 用坐标给 skill 定位、判重叠、拆分、配组 |
+| [make-skill](skills/make-skill/SKILL.md) | `quality` | `subject` | 写一份 skill 的合格线与写法；事实带日期 |
+| [skill-lifecycle](skills/skill-lifecycle/SKILL.md) | `process` | `method` | 要不要做、怎么拆、何时升版本与发布、谁批准 |
+| [skit](skills/skit/SKILL.md) | `execution` | `subject` | 装卸查询的命令、验证装成功、`$_S` 引用 |
 
 ## 结构
 
@@ -22,6 +26,8 @@
 | `AGENTS.md` | 本仓库的常驻约定 | 任何在本仓库工作的 agent |
 | `skills/skill-atlas/` | 内容定位 | 安装者 |
 | `skills/make-skill/` | 写一份 skill | 安装者 |
+| `skills/skill-lifecycle/` | 生命周期与授权 | 安装者 |
+| `skills/skit/` | 安装与验证命令 | 安装者 |
 
 ## 这套东西不是什么
 
