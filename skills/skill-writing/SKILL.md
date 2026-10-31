@@ -3,9 +3,7 @@ name: skill-writing
 description: >
   Use when writing or rewriting the text of one Agent Skill: frontmatter fields,
   the trigger description, body structure, references, and proving the result is
-  well formed. Covers the Agent Skills specification. Not for deciding whether to
-  build a skill, extracting material, splitting one, testing triggers with a
-  query set, publishing, or installing.
+  well formed. Covers the Agent Skills specification for one skill's text.
 license: MIT
 metadata:
   face: quality
@@ -55,8 +53,8 @@ metadata:
 
 **独立**
 
-- 不引用其他 skill，不提它们的名字，不假设它们存在。需要的内容写成本文的最小充分版。
-- 边界只写"不负责什么"，不写"谁负责"；指名就是把两份焊在一起。
+- 不引用其他 skill，不提它们的名字，不假设它们存在。
+- 不属于本文的内容不写；需要的内容写成本文的最小充分版。
 
 **断言必须能失败**
 
@@ -103,8 +101,4 @@ metadata:
 
 ## 输出
 
-写完或审完给四项：它回答哪个问句；作用域是什么；哪些句子是事实（带来源日期）；哪些是判据与风格。再加一句"不负责什么"。
-
-## 不负责
-
-要不要做、怎么提取、怎么测触发、何时发布，以及安装与命令，都不在本文范围内。
+写完或审完给四项：它回答哪个问句；作用域是什么；哪些句子是事实（带来源日期）；哪些是判据与风格。

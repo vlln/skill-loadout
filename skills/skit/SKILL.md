@@ -4,8 +4,7 @@ description: >
   Use when installing, updating, listing, checking, or exporting skills with the
   skit CLI, when deciding which source form to install from, or when writing
   path references for bundled scripts. Covers where skills are stored, how they
-  reach agent directories, and what skit does and does not validate. Not for
-  writing a skill or deciding when to publish one.
+  reach agent directories, and what skit does and does not validate.
 license: MIT
 metadata:
   face: execution
@@ -58,8 +57,4 @@ skit export <name>             # 导出到指定目录
 
 ## 引用包内文件
 
-按官方规范写相对 skill 根目录的路径（如 `scripts/run.sh`）。某些 host 会以当前工作目录解析相对路径而不是 skill 根；遇到这种 host，在调用处先解析成绝对路径再执行，不要因此改写技能内的引用格式
-
-## 不负责
-
-技能写得对不对、触发准不准 → 质量面；该不该做、什么时候发版 → 流程面。本文只给动作与验证，不给判断标准。
+按官方规范写相对 skill 根目录的路径（如 `scripts/run.sh`）。某些 host 会以当前工作目录解析相对路径而不是 skill 根；遇到这种 host，在调用处先解析成绝对路径再执行，不要因此改写技能内的引用格式。

@@ -4,8 +4,7 @@ description: >
   Use when starting or finishing the making of a skill: deciding whether it is
   worth making, extracting real material, splitting it, testing its trigger with
   a query set, writing its README, publishing it, and keeping it current. Owns
-  the order, the gates, and who authorizes each step. Not for how to write the
-  fields and prose, how to position a set of skills, or how to install one.
+  the order, the gates, and who authorizes each step.
 license: MIT
 metadata:
   face: process
@@ -22,7 +21,7 @@ metadata:
 |---|---|---|---|
 | 0 决定 | 一句话：反复任务 + 知识缺口 | 一段常驻规则不足以替代 | 人，或人明确委托 |
 | 1 提取 | 真实步骤、纠正、输入输出、项目事实 | 有模型猜不到的、来自真实工作的材料 | agent |
-| 2 拆 | 一份，或几份带边界的清单 | 每份都能一句话说清何时用 | agent |
+| 2 拆 | 一份，或几份清单 | 每份都能一句话说清何时用 | agent |
 | 3 写 | `SKILL.md` 初稿 | 字段与文字达到合格线 | agent |
 | 4 验收 | 校验结果 + 查询集测试 | 负控会失败；该中中，近邻不中 | agent，异常交人 |
 | 5 发布 | 可安装的源 + README | 干净环境照 README 能装成 | **人** |
@@ -50,7 +49,7 @@ metadata:
 
 不是拆分信号的：两份 skill 抢同一个触发——那是描述问题，先改描述。
 
-拆完每份写清"不负责什么"；共享内容各自写最小充分版，不互相引用。
+拆完每份只写自己要管的事；共享内容各自写最小充分版，不互相引用。
 
 ## 3 写
 
@@ -78,7 +77,3 @@ metadata:
 
 - 用真实任务再跑一遍，读执行轨迹而不只看结果——看不懂的步骤通常说明指令太含糊或没给出默认。
 - 只做三件事：重核带日期的事实、看描述是否仍命中真实请求、删掉不再成立的建议。不要为了显得在维护而加内容。
-
-## 不负责
-
-写法与字段的合格性、定位与重叠判断、安装与清单命令，都不在本文范围内。
