@@ -28,6 +28,7 @@
 | `THEORY.md` | 内容坐标：面 | 写 skill 的人、审 skill 的 agent |
 | `docs/placement-audit.md` | 归位审计：现有材料能否被三个面放下 | 维护理论的人 |
 | `docs/status.md` | 证据与限制：现在能说多少，哪些预测可被推翻 | 维护理论的人 |
+| `docs/method.md` | 从选题到 loadout 的制作方法：选题、材料、实验、迭代、收敛 | 要做下一个 skill 的人 |
 | `AGENTS.md` | 本仓库的常驻约定 | 任何在本仓库工作的 agent |
 | `skills/skill-atlas/` | 坐标与标准 | 安装者 |
 | `skills/skill-writing/` | 写一份 skill | 安装者 |
