@@ -1,15 +1,15 @@
 ---
 name: skill-atlas
 description: >
-  Use when placing a skill on a coordinate, judging whether two skills overlap or
-  could be swapped, splitting a skill that answers two different questions, or
-  assembling a small set of skills for one kind of task. Also for auditing how a
-  batch of existing skills is distributed.
+  当你要判断一份 skill 主要回答哪个问题、两份 skill 是否重叠或能否互换、一份 skill 该不该拆，
+  或者要为一类任务配一组 skill（loadout）并检查组内有没有两份抢同一段权威时使用本 skill。
+  也用于审计一批现有 skill 在流程 / 质量 / 执行三面上的分布。
+  Use when placing a skill by the question it answers, checking overlap, splitting, or assembling a loadout.
 license: MIT
 metadata:
   face: quality
   author: vlln
-  version: "0.3.0"
+  version: "0.4.0"
 ---
 
 # 定位一份 skill
@@ -60,4 +60,16 @@ metadata:
 
 **拆分。** 沿"流程 / 质量 / 执行"的缝切；质量内部的两类内容只需在正文分区，不必拆成两份。切完检查：有没有一条规则两边都放不下？有，说明缝切错了。
 
-**配一组。** 为一个任务配齐三面——这几份合起来叫一个 loadout，它不落盘、用完即散。共用规则各自写最小充分版，不用引用连接；最后用三句真实请求试一遍，看会不会同时命中两份。
+**配一组。** 为一类任务挑出要加载的几份——合起来叫一个 loadout，它不落盘、用完即散。问的是"这个任务缺哪一面"，不是"三面凑齐没有"：只写 README 的任务可能只需要质量面。共用规则各自写最小充分版，不用引用连接。
+
+## 一组的权威检查
+
+单份都合格，组合起来仍可能有两份对同一段指令都声称权威。配好一组后做三步：
+
+1. **比描述。** 把每份描述里的触发短语逐条列出；同一个短语（例如"要新增一个门禁"）出现在两份里，就是触发重叠。
+2. **比判定句。** 列出每份里"凭什么算 / 必须 / 不得"的句子，按话题归堆；同一话题在两份里各自给出定义（而不只是一句应用），就是权威重叠。
+3. **按任务归还。** 重叠的那段只留给"哪个任务会用到它"的那一份；另一份删掉定义，最多保留它自己任务需要的一句应用。触发短语同理，只留在主人的描述里。
+
+最后用一组真实请求试一遍：每句请求写下预期命中哪几份，再看描述是否支持这个预期。一句请求同时命中两份是正常的（它们回答不同问题）；两份为同一句请求给出不同的合格线，才是要修的。
+
+面标错也在这一步暴露：一份标 `execution` 的 skill，判定句大多是"凭什么算合格"，它其实站在质量面。

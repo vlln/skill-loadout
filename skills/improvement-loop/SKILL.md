@@ -1,17 +1,15 @@
 ---
 name: improvement-loop
 description: >
-  Use when an artifact — a skill, README, prompt, document, config — is being
-  improved over several rounds and "it looks better" is not enough: to prove one
-  version beats another, to find which rule actually changed the output, to keep
-  a champion and regress the rest, or to decide when to stop iterating. Covers
-  baseline-versus-candidate runs, countable metrics, attribution, and stopping
-  rules.
+  当一个产物（skill、README、提示词、文档、配置）要改好几轮、而"看起来更好"不够用时使用本 skill：
+  证明这一版胜过上一版、找出哪条改动真的改变了产出、保留冠军并防止回退、决定何时停。
+  给出基线对照、可数度量、归因、夹具、冠军线与停止条件。判定：说不出"这一版改了哪一句、因此哪个数变了"，就还不能宣称变好。
+  Use when iterating an artifact over rounds and needing proof each round is better.
 license: MIT
 metadata:
   face: process
   author: vlln
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # 改进回路：让"更好"可以被证明
@@ -52,6 +50,14 @@ metadata:
 - 候选**一次只改一条**判据。一次改五条，涨了也不知道是哪条起作用。
 - 基线与候选**互相不可见**。让改候选的人看到基线，会不自觉地对照着抄或避开。
 
+## 夹具
+
+同一个输入要能被反复使用，否则第二轮就没法和第一轮比。
+
+- 夹具是一份固定输入：真实仓库的副本、一段 diff、一份需求，加一句固定的任务与禁令。放进版本控制，和对照记录放在一起。
+- 夹具本身要先验过：diff 能应用、仓库能构建、埋下的问题确实存在。夹具坏了，所有轮次都在测夹具。
+- 产物会被别人消费时（计划、规范、清单），度量不止看它本身：把它交给另一个执行者照做一次，数执行时撞上的矛盾与返工。纸面越细，越需要这一步。
+
 ## 度量与归因
 
 先量可数的，再读不可数的：
@@ -87,6 +93,9 @@ metadata:
 - **把巧合当因果**：候选变好但答不出哪处改动带来的，按未生效处理。
 - **改太多**：一轮动五处，涨了也不知道为什么，坏了也不知道退哪。
 - **没有版本账本**：删掉中间版本，等于删掉证据。
+- **单次运行当结论**：同一夹具同一版本跑两次，结果也会不同。差距小于两次运行之间的波动，按打平处理；要下结论的差距，至少跑两次确认方向不变。
+- **拟合夹具**：每一轮都在同一个夹具上补一条规则，规则会越来越像那个夹具的答案。新规则在第二个夹具上也起作用，才算确认。
+- **同一个人出题又答题**：写规则的和执行对照的是同一个模型时，对照的盲点与规则的盲点重合。条件允许时换一个执行者。
 
 ## 事实：一次真实的四版记录
 

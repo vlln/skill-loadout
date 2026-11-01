@@ -1,14 +1,15 @@
 ---
 name: skill-writing
 description: >
-  Use when writing or rewriting the text of one Agent Skill: frontmatter fields,
-  the trigger description, body structure, references, and proving the result is
-  well formed. Covers the Agent Skills specification for one skill's text.
+  当你要写、改写或审一份 Agent Skill 的文字时使用本 skill：frontmatter 字段、触发描述、正文结构、
+  references 的拆分与指路，以及证明它格式正确、规则之间不互相矛盾。给出 Agent Skills 规范的事实、
+  合格线与写法。判定：这句话删掉之后，模型会不会做错——不会，就删。
+  Use when writing or reviewing one skill's text: frontmatter, description, body, references.
 license: MIT
 metadata:
   face: quality
   author: vlln
-  version: "2.2.0"
+  version: "2.3.0"
 ---
 
 # 写一份 skill
@@ -34,6 +35,7 @@ metadata:
 - **`description` 会被宿主截断，长度上限不止一处**：规范上限 1024 字符；DeepSeek Harness 的会话目录默认只显示前 **500** 字符（`catalogDescriptionMaxLength`，核对 2026-10-19）。所以判定性的句子必须放在最前面，后面的内容随时可能不被读到。
 - 文件引用用**相对 skill 根目录的路径**，层级保持一层。
 - 官方 `skills-ref validate <dir>` 只校验 frontmatter 与命名，不校验内容质量。
+- `skit validate`（0.10.0-dev，核对 2026-11-01）还校验正文长度与相对链接，**包括行内代码里形似链接的片段**：写一个图片语法示例会被当成断链报错。示例改用文字描述，或放进围栏代码块再验一次。
 
 ## 判据：合格线
 
@@ -63,6 +65,16 @@ metadata:
 
 **事实带来源与日期**：任何"宿主支持 / 最多多少字符 / 现在是最新版"的断言都标核对日期，否则它比规则先过期。
 
+**规则要带适用条件**
+
+- 每条"必须"都要能说出它在什么规模、什么风险下成立。缺了这句，模型会对一行修正也走完整流程——过度执行不报错，所以比漏执行更难被发现。
+- 正文至少有一句写明怎么按规模裁剪，以及裁剪要留下什么理由。
+
+**规则之间不得互相矛盾**
+
+- 同一份里的两条规则同时照做必须可行。逐对检查最容易冲突的几类：先后顺序（"先校验"与"先跳过"）、不变与改动（"输出逐字节一致"与"重构入口"）、两条用例的期望结果。
+- 能举出一个输入让两条规则给出不同答案，就先定优先级并写进正文，不留给执行者猜。
+
 ## 风格：怎么写更好
 
 **description**
@@ -88,6 +100,8 @@ metadata:
 通用技巧，按需要挑，不是清单：
 
 - **gotchas**：违反合理假设的具体事实——现象、原因、最小修法。放正文，别放深的 reference。
+- **指路句**：每个 reference 链接后跟一句"读它的时候：……"，写清在什么情形下才需要读。没有这句，模型要么全读、要么全不读。
+- **判定句**：description 末尾给一句"判定：……"，让模型在边界情形下能自己裁决该不该用、该怎么判。
 - **模板**：要固定输出格式时给具体骨架，比散文描述可靠。
 - **清单**：多步且有依赖或关口时给。
 - **校验回环**：做完跑校验，失败就修，通过才继续。
@@ -99,6 +113,7 @@ metadata:
 - 默认给一个，另给一条后路；不要摆一堆等权选项。
 - 多解可用时讲理并给默认，脆弱处（精确命令、顺序、格式）钉死。
 - 一段讲一件事；判据用"必须 / 不得 / 应当"，不用"注意""确保"。
+- 正文常见合适体量是 60–130 行；更长时先把只在特定情形下用到的细则移进 references，主文件留判断与关口。
 
 ## 输出
 
