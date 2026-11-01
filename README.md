@@ -8,7 +8,9 @@
 
 ## 当前状态
 
-**理论已定骨架，做过两组真实对照实验（README、软件开发 loadout），结论记在各自仓库的 `docs/experiment.md`。** [THEORY.md](THEORY.md) 是唯一权威；[docs/placement-audit.md](docs/placement-audit.md) 是对 23 份真实 skill 的归位审计，也是这套坐标第一次被现实检验。
+**理论已定骨架，方法跑过三轮真实对照。** [THEORY.md](THEORY.md) 是唯一权威；[docs/status.md](docs/status.md) 写清每条结论的证据有多硬、哪些预测还没测过。
+
+两个产品仓库是这套方法的产出，也是它的证据：一份 README 写作 skill，一组通用软件开发 skill（7 份）。夹具与每一轮的原始产出都随它们入库。
 
 五份 skill，覆盖三个面：
 
@@ -27,8 +29,8 @@
 | 路径 | 是什么 | 读者 |
 |---|---|---|
 | `THEORY.md` | 内容坐标：面 | 写 skill 的人、审 skill 的 agent |
-| `docs/placement-audit.md` | 归位审计：现有材料能否被三个面放下 | 维护理论的人 |
-| `docs/status.md` | 证据与限制：现在能说多少，哪些预测可被推翻 | 维护理论的人 |
+| `docs/archive/` | 归档：旧模型下的归位审计，留作坐标第一次被检验的记录 | 维护理论的人 |
+| `docs/status.md` | 证据与限制：现在能说多少、有多硬，哪些预测可被推翻 | 维护理论的人 |
 | `docs/method.md` | 从选题到 loadout 的制作方法：选题、材料、实验、迭代、收敛 | 要做下一个 skill 的人 |
 | `AGENTS.md` | 本仓库的常驻约定 | 任何在本仓库工作的 agent |
 | `skills/skill-atlas/` | 坐标与标准 | 安装者 |
