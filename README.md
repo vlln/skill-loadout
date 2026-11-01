@@ -8,9 +8,9 @@
 
 ## 当前状态
 
-**理论已定骨架，开始验证。** [THEORY.md](THEORY.md) 是唯一权威；[docs/placement-audit.md](docs/placement-audit.md) 是对 23 份真实 skill 的归位审计，也是这套坐标第一次被现实检验。
+**理论已定骨架，做过两组真实对照实验（README、软件开发 loadout），结论记在各自仓库的 `docs/experiment.md`。** [THEORY.md](THEORY.md) 是唯一权威；[docs/placement-audit.md](docs/placement-audit.md) 是对 23 份真实 skill 的归位审计，也是这套坐标第一次被现实检验。
 
-已创建四份 skill，覆盖三个面：
+五份 skill，覆盖三个面：
 
 | 技能 | face | 管什么 |
 |---|---|---|
@@ -20,7 +20,7 @@
 | [skit](skills/skit/SKILL.md) | `execution` | 安装、检查、导出；装完验什么 |
 | [improvement-loop](skills/improvement-loop/SKILL.md) | `process` | 多轮改进的轻量回路：基线对照、归因、冠军线、停止条件 |
 
-`skill-atlas` 定义标准，`skill-writing` 按标准写，`make-skill` 管步骤与关口，`skit` 管动作。
+`skill-atlas` 定位，`skill-writing` 给合格线，`make-skill` 管步骤与关口，`skit` 管动作，`improvement-loop` 管多轮改进怎么证明。
 
 ## 结构
 
