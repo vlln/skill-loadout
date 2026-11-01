@@ -1,5 +1,5 @@
 ---
-name: make-skill
+name: skill-making
 description: >
   当你要从零做一份 skill 或一组 skill（一个 loadout）、把一批现有材料提炼成 skill、或者要决定一份 skill
   能不能发布与何时复查时使用本 skill。管顺序、关口与谁决定：决定做不做、提取真实材料、先画地图再拆分、

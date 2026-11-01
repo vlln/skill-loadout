@@ -18,11 +18,24 @@
 |---|---|---|
 | [skill-atlas](skills/skill-atlas/SKILL.md) | `quality` | 定位、判重叠、拆分、配组，以及一组之内的权威检查 |
 | [skill-writing](skills/skill-writing/SKILL.md) | `quality` | 写一份 skill：字段契约、描述、正文、引用的合格线与写法 |
-| [make-skill](skills/make-skill/SKILL.md) | `process` | 做一份或一组：决定、提取、地图、写、验收（机械 / 触发 / 效果）、发布、维护 |
+| [skill-making](skills/skill-making/SKILL.md) | `process` | 做一份或一组：决定、提取、地图、写、验收（机械 / 触发 / 效果）、发布、维护 |
 | [skit](skills/skit/SKILL.md) | `execution` | 安装、检查、导出；装完验什么 |
 | [improvement-loop](skills/improvement-loop/SKILL.md) | `process` | 多轮改进的轻量回路：基线对照、归因、冠军线、停止条件 |
 
-`skill-atlas` 定位，`skill-writing` 给合格线，`make-skill` 管步骤与关口，`skit` 管动作，`improvement-loop` 管多轮改进怎么证明。
+`skill-atlas` 定位，`skill-writing` 给合格线，`skill-making` 管步骤与关口，`skit` 管动作，`improvement-loop` 管多轮改进怎么证明。
+
+## 安装
+
+这个仓库还没有推到远端，先克隆或下载，然后按需装：
+
+```sh
+skit install ./skills/skill-atlas ./skills/skill-writing      # 定位与合格线
+skit install ./skills/skill-making ./skills/improvement-loop  # 流程与改进回路
+skit install ./skills/skit                                    # 安装与校验命令
+skit check
+```
+
+五份互不引用，装一份也能用。
 
 ## 结构
 
@@ -35,7 +48,7 @@
 | `AGENTS.md` | 本仓库的常驻约定 | 任何在本仓库工作的 agent |
 | `skills/skill-atlas/` | 坐标与标准 | 安装者 |
 | `skills/skill-writing/` | 写一份 skill | 安装者 |
-| `skills/make-skill/` | 制作流程 | 安装者 |
+| `skills/skill-making/` | 制作流程 | 安装者 |
 | `skills/skit/` | 安装与验证命令 | 安装者 |
 | `skills/improvement-loop/` | 多轮改进与证明 | 安装者 |
 
