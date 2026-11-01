@@ -18,6 +18,7 @@
 | [skill-writing](skills/skill-writing/SKILL.md) | `quality` | 写一份 skill：字段契约、描述、正文、引用的合格线与写法 |
 | [make-skill](skills/make-skill/SKILL.md) | `process` | 制作流程：决定、提取、拆分、验收与查询集、发布、维护 |
 | [skit](skills/skit/SKILL.md) | `execution` | 安装、检查、导出；装完验什么 |
+| [skill-experiments](skills/skill-experiments/SKILL.md) | `process` | 用同题对照证明 skill 真的改变了产出，并迭代到有效 |
 
 `skill-atlas` 定义标准，`skill-writing` 按标准写，`make-skill` 管步骤与关口，`skit` 管动作。
 
@@ -34,6 +35,7 @@
 | `skills/skill-writing/` | 写一份 skill | 安装者 |
 | `skills/make-skill/` | 制作流程 | 安装者 |
 | `skills/skit/` | 安装与验证命令 | 安装者 |
+| `skills/skill-experiments/` | 同题对照与迭代 | 安装者 |
 
 ## 为什么是这种形状
 

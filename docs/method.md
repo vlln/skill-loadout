@@ -1,6 +1,6 @@
 # 从选题到 loadout：一条可重复的制作方法
 
-这份文档记录一次真实制作（`readme-writing`）里有效、可复用的步骤。它不是理论，是操作记录；等它在第二个、第三个选题上复现，再考虑升级成 skill。
+这份文档记录一次真实制作（`readme-writing`）里有效、可复用的步骤。它现在也是 [skills/skill-experiments](../skills/skill-experiments/SKILL.md) 的来源；那份 skill 只保留可执行的部分，这里是完整记录与理由。
 
 ## 0. 什么选题值得做
 
