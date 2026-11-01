@@ -1,6 +1,6 @@
 # AGENTS.md
 
-本仓库用两个坐标组织 skill 的内容：面（`process` / `quality` / `execution`）与作用域（`method` / `subject` / `instance`）。定义见 [THEORY.md](THEORY.md)，它是本仓库的唯一权威。
+本仓库用一套面来组织 skill 的内容：`process` / `quality` / `execution`，回答"它主要回答哪个问题"。定义见 [THEORY.md](THEORY.md)，它是本仓库的唯一权威。
 
 - 写任何新 skill 之前，先回答"它回答哪个问句""它在讲方法、某类对象，还是某个实例"。答不出来就先别写。
 - 一份 skill 只标一个主面。想标两个，说明该拆。
@@ -8,5 +8,5 @@
 - skill 之间不互相引用：不写"见 X"，不提别的 skill 的名字。不属于本文的内容不写，不用否定句划界；共享内容各自写最小充分版。
 - 不引入 manifest、必填字段、校验脚本、覆盖率一类的机制。分类是给人判断用的，不是给程序校验用的。
 - 改理论时，先改 `THEORY.md`，再改依赖它的 skill；不要只改 skill 里的说法，让两处漂移。
-- 中文正文，`face` / `scope` 的取值与标识符保持英文。
+- 中文正文，`face` 的取值与标识符保持英文。
 - 这个仓库处于理论阶段：优先把话说清楚，不要急着凑 skill 数量。

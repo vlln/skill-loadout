@@ -7,7 +7,6 @@ description: >
 license: MIT
 metadata:
   face: quality
-  scope: subject
   author: vlln
   version: "2.2.0"
 ---
