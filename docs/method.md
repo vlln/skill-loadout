@@ -1,6 +1,6 @@
 # 从选题到 loadout：一条可重复的制作方法
 
-这份文档记录一次真实制作（`readme-writing`）里有效、可复用的步骤。它现在也是 [skills/skill-experiments](../skills/skill-experiments/SKILL.md) 的来源；那份 skill 只保留可执行的部分，这里是完整记录与理由。
+这份文档记录一次真实制作（`readme-writing`）里有效、可复用的步骤。它现在也是 [skills/improvement-loop](../skills/improvement-loop/SKILL.md) 的来源；那份 skill 只保留可执行的回路，这里是完整记录与理由；它不限于 skill，任何可观察产物的多轮改进都适用。
 
 ## 0. 什么选题值得做
 
