@@ -4,12 +4,12 @@
 
 <h1 align="center">skill-loadout</h1>
 
-<p align="center"><b>用一个问题给 skill 的内容定位：它主要回答哪个问题。</b></p>
+<p align="center"><b>帮你把一堆 skill 整理成：一次任务真正要用的那一组。</b></p>
 
 <p align="center">
+  <a href="#它给你什么">它给你什么</a> ·
   <a href="#安装">安装</a> ·
-  <a href="THEORY.md">理论</a> ·
-  <a href="docs/status.md">证据</a>
+  <a href="#为什么这样分">为什么这样分</a>
 </p>
 
 <p align="center">
@@ -18,19 +18,22 @@
 
 <br>
 
-## 它是什么
+## 先说个你大概遇到过的情况
 
-一个任务可能需要几份 skill，各回答不同的问题；已经存在的 skill 可以被归位、比较、判断是否重叠。
+skill 越装越多，然后开始不对劲：
 
-**用 `atlas` 定位，用 `loadout` 组装**：前者是判断与地图，后者是一个任务实际加载的那几份。项目名取后者——这个仓库产出的是"可组装的一组"，不是一个工具。
+- 每个会话都把**全部** skill 的描述塞进上下文，装的越多越吵；
+- 你其实说不清这个会话到底加载了哪几份、生效的是哪些；
+- 两份 skill 的触发描述互相重叠，命中谁靠运气；
+- 想换一套（比如从"写代码"切到"写文档"）只能挨个点开关。
 
-## 当前状态
+这通常不是哪份 skill 写得差，而是"一堆各自为战的 skill"这个形态到了数量上限。
 
-**理论已定骨架，方法跑过五轮真实对照。** [THEORY.md](THEORY.md) 是唯一权威；[docs/status.md](docs/status.md) 写清每条结论的证据有多硬、哪些预测还没测过。
+## 它给你什么
 
-产品仓库 [sw-dev-loadout](https://github.com/vlln/sw-dev-loadout) 是这套方法的产出，也是它的证据：8 份 skill（7 份通用软件开发 + 1 份 README 写作，后者原是独立仓库，实验完成后整体并入）。夹具与每一轮的原始产出都随它入库。
+两条路，一条做 skill，一条用 skill。
 
-五份 skill，覆盖三个面：
+**做**：五份 skill 帮你产出**符合 loadout 理念的 skill**——每份只回答一个问题、彼此独立不互相引用、描述写得能被正确触发、一组之间不抢同一段权威。
 
 | skill | face | domain | 介绍 |
 |---|---|---|---|
@@ -40,17 +43,15 @@
 | [skit](skills/skit/SKILL.md) | `execution` | skills | 安装、检查、导出与验收 |
 | [improvement-loop](skills/improvement-loop/SKILL.md) | `process` | skills | 多轮改进怎么证明 |
 
-`skill-atlas` 定位，`skill-writing` 给合格线，`skill-making` 管步骤与关口，`skit` 管动作，`improvement-loop` 管多轮改进怎么证明。
+典型用法：拿一堆材料要做 skill，先用 `skill-atlas` 判断每份该回答哪个问题、会不会和别的抢；用 `skill-writing` 写；`skill-making` 管从决定做到发布的流程；写完用 `skit` 装上验一遍；以后改版用 `improvement-loop` 证明改得更好了。
 
-## 插件：dsh-loadout
-
-loadout 这个概念落在 dsh 里的形态：侧栏插件，把"一组 skill"变成可命名、可整组启停、可排他应用的东西（启用这组、停用其余，换任务换一组）。基于 dsh-skills-manager 改造，装后发现、安装、更新、启停单个技能的能力也都在。
+**用**：一个 dsh 插件把"一组 skill"变成可命名、可切换、可观察的编组。
 
 ```sh
 dsh plugin --profile web add "https://github.com/vlln/skill-loadout.git#path:/plugin"
 ```
 
-详见 [plugin/README.md](plugin/README.md)。
+装上之后默认不再全量加载：会话只加载你选的那组编组，聊天框上有一个控件随时能看当前加载了什么、换一组。详见 [plugin/README.md](plugin/README.md)。
 
 ## 安装
 
@@ -79,41 +80,31 @@ Run `npx skills use "vlln/skill-loadout@skill-writing"` and follow the generated
 
 跑通的样子：`skit list` 里出现刚装的几份，且 `skit check` 没有指向它们的报错。
 
+## 为什么这样分
+
+回到开头那个混乱。我们的答案是把 skill 当成**插卡**：
+
+- 每张卡只回答一个问题——否则两张卡会抢同一段指令；
+- 卡与卡彼此独立，不引用也不依赖顺序——否则换一张就得换全部；
+- 卡面写清什么时候插——没有操作员替你挑卡，`description` 是唯一的操作员。
+
+按"它主要回答哪个问题"分，只有三个答案：**流程**（何时做、谁决定）、**质量**（凭什么算合格）、**执行**（具体怎么动手）。这就是每份 skill 的 `face`。
+
+顺带两个直接后果：一个任务通常是**几份卡**而不是一份，这组卡就是 loadout；而一旦卡多到一定程度，"默认全加载"必然崩，所以需要一个按组控制的东西——就是上面那个插件。
+
+完整论证、证据强度与可被推翻的预测在 [THEORY.md](THEORY.md) 与 [docs/status.md](docs/status.md)；这个方法是实跑出来的，产品仓库 [sw-dev-loadout](https://github.com/vlln/sw-dev-loadout)（8 份 skill）是它的产出，也是它的实验样本。
+
 ## 结构
 
-| 路径 | 是什么 | 读者 |
-|---|---|---|
-| `THEORY.md` | 内容坐标：面 | 写 skill 的人、审 skill 的 agent |
-| `docs/archive/` | 归档：旧模型下的归位审计，留作坐标第一次被检验的记录 | 维护理论的人 |
-| `docs/status.md` | 证据与限制：现在能说多少、有多硬，哪些预测可被推翻 | 维护理论的人 |
-| `docs/method.md` | 从选题到 loadout 的制作方法：选题、材料、实验、迭代、收敛 | 要做下一个 skill 的人 |
-| `AGENTS.md` | 本仓库的常驻约定 | 任何在本仓库工作的 agent |
-| `skills/skill-atlas/` | 坐标与标准 | 安装者 |
-| `skills/skill-writing/` | 写一份 skill | 安装者 |
-| `skills/skill-making/` | 制作流程 | 安装者 |
-| `skills/skit/` | 安装与验证命令 | 安装者 |
-| `skills/improvement-loop/` | 多轮改进与证明 | 安装者 |
-| `plugin/` | dsh-loadout 插件：以 loadout（一组 skill）为单位启用、配置、管理 | 使用者 |
-
-## 为什么是这种形状
-
-把一组 skill 想成插卡：每个技能是一张独立的卡，不认别的卡；一个任务需要几张就插几张，换任务就换一组。
-
-这个类比只在一点上有用——插卡改变的是上下文，不是能力本身。所以插错卡（误触发）和插对卡一样容易发生，而"插上就会"是错觉。
-
-由此有三条硬约束：
-
-- 卡带彼此独立：不引用、不依赖顺序，否则换一张就得换全部；
-- 每张卡只回答一个问题：否则两张卡会抢同一段指令；
-- 卡面写清何时插：没有操作员替你挑卡，`description` 是唯一的操作员。
-
-## 它的位置
-
-- 判断透镜：给人（和 agent）判断 skill 站在哪、能不能换。
-- 装在哪、谁可见：由 Skill 规范与宿主决定。
-- 一组 skill（一个 `loadout`）怎么用：由使用者决定。
-
-类比只是解释，不进入命名：skill 的名字按任务取，按 `description` 被匹配；带典故的名字只会让每次阅读多一层解码。
+| 路径 | 是什么 |
+|---|---|
+| `THEORY.md` | 内容坐标：按"回答哪个问题"分三面 |
+| `skills/` | 五份 skill（见上表） |
+| `plugin/` | dsh-loadout 插件：按 loadout 启用、配置、管理一组 skill |
+| `docs/status.md` | 证据与限制：每条结论有多硬、哪些预测还没测过 |
+| `docs/method.md` | 从选题到 loadout 的制作方法 |
+| `docs/archive/` | 旧模型下的归位审计，留作坐标第一次被检验的记录 |
+| `AGENTS.md` | 本仓库的常驻约定 |
 
 ## 许可
 
