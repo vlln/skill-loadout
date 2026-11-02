@@ -1,12 +1,28 @@
-# skill-loadout
+<p align="center">
+  <img src="docs/assets/hero.png" alt="skill-loadout：一叠半透明的技能卡片，一张正在发着微光入槽" width="100%">
+</p>
 
-用一个问题给 skill 的内容定位：**它主要回答哪个问题**（面）。
+<h1 align="center">skill-loadout</h1>
+
+<p align="center"><b>用一个问题给 skill 的内容定位：它主要回答哪个问题。</b></p>
+
+<p align="center">
+  <a href="#安装">安装</a> ·
+  <a href="THEORY.md">理论</a> ·
+  <a href="docs/status.md">证据</a>
+</p>
+
+<p align="center">
+  <a href="https://agentskills.io"><img alt="Agent Skills" src="https://img.shields.io/badge/Agent_Skills-规范-4D6BFE?style=flat-square"></a>
+</p>
+
+<br>
+
+## 它是什么
 
 一个任务可能需要几份 skill，各回答不同的问题；已经存在的 skill 可以被归位、比较、判断是否重叠。
 
 **用 `atlas` 定位，用 `loadout` 组装**：前者是判断与地图，后者是一个任务实际加载的那几份。项目名取后者——这个仓库产出的是"可组装的一组"，不是一个工具。
-
-[![Agent Skills](https://img.shields.io/badge/Agent_Skills-规范-4D6BFE?style=flat-square)](https://agentskills.io)
 
 ## 当前状态
 
