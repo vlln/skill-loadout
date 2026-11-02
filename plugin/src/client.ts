@@ -1601,7 +1601,8 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
       '.dssm-chip-label{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}',
       '.dssm-chip-chevron{color:var(--dsw-alias-label-caption);flex:none;transition:transform .12s;display:inline-flex}',
       '.dssm-chip-chevron.is-open{transform:rotate(180deg)}',
-      '.dssm-chip-manager{max-height:min(78vh,760px);overflow:auto}',
+      '.dssm-modal.dssm-modal-manager{width:min(960px,94vw)!important;max-height:min(88vh,860px)!important}',
+      '.dssm-modal-manager .dssm-modal-content{min-height:0}',
       '@container (width<=460px){.dssm-chip-trigger:has(.dssm-chip-icon) .dssm-chip-label{display:none}}',
     ].join('');
     function LoadoutChip(props: {t?: Translate; sessionId?: string}) {
@@ -1685,7 +1686,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
         key: "manager",
         title: t("title"),
         closeLabel: t("btn.close"),
-        className: "dssm-chip-manager",
+        className: "dssm-modal-manager",
         onClose: function () { setManagerOpen(false); },
       }, h(SkillManagerSection, { t: t, useSessions: function () { return sessionId; } })) : null;
 
