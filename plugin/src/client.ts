@@ -15,7 +15,7 @@ import { createDestinationKit, defaultDestination, destinationPayload, destinati
 import { resolveApiUrl } from "./api-base.js";
 import { createSourceSelect } from "./source-select.js";
 import * as primitives from "@deepseek-ai/dsh-client-ui-primitives";
-import { Button as PrimitiveButton, Modal as PrimitiveModal, SegmentedTabs, Switch as PrimitiveSwitch, Tag as PrimitiveTag } from "@deepseek-ai/dsh-client-ui-primitives";
+import { Button as PrimitiveButton, Modal as PrimitiveModal, Menu, SegmentedTabs, Switch as PrimitiveSwitch, Tag as PrimitiveTag } from "@deepseek-ai/dsh-client-ui-primitives";
 import { Input, foldChevron } from "./plugin-ui.js";
 import { installSettingsNavIcon } from "./settings-nav-icon.js";
 import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } from "./sidebar-entry.js";
@@ -627,8 +627,8 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
       var lnts = react.useState(""), loadoutNoteText = lnts[0], setLoadoutNoteText = lnts[1];
       var lsel = react.useState<Record<string, boolean>>({}), loadoutSelection = lsel[0], setLoadoutSelection = lsel[1];
       var lex = react.useState<Record<string, boolean>>({}), loadoutExclusive = lex[0], setLoadoutExclusive = lex[1];
-      function loadLoadouts() {
-        setLoadoutState(function (previous) { return { loading: true, error: null, data: previous ? previous.data : null }; });
+      function loadLoadouts(silent?: boolean) {
+        setLoadoutState(function (previous) { return { loading: silent !== true, error: null, data: previous ? previous.data : null }; });
         return sessionApi("/loadouts").then(function (data) {
           setLoadoutState({ loading: false, error: null, data: data && Array.isArray(data.loadouts) ? data : { scope: "user", loadouts: [], active: null } });
         }).catch(function (error) {
@@ -662,6 +662,34 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
       function refresh(silent: boolean) { if (!silent) setSnapshot({ loading: true, error: null, data: snapshot.data }); return sessionApi("/state").then(function (data) { setSnapshot({ loading: false, error: null, data: data }); return data; }).catch(function (error) { setSnapshot({ loading: false, error: translateError(t, error), data: snapshot.data }); }); }
       react.useEffect(function () { refresh(false); }, []);
       function post<K extends keyof ApiRoutes>(path: K, body: unknown, successKey?: string | null, successParams?: object): Promise<ApiRoutes[K]> { if (inflightRef.current) return Promise.reject({ error: "operation already in progress" }); inflightRef.current = true; setBusy(true); setResult(null); return sessionApi(path, { method: "POST", headers: MUTATION_HEADERS, body: JSON.stringify(body || {}) }).then(function (data) { setResult({ ok: true, text: successKey ? t(successKey, successParams || data || {}) : t("result.updated") }); var scopedWorkspace = body && typeof (body as { workspace?: unknown }).workspace === "string" ? (body as { workspace: string }).workspace : ""; return Promise.all([refresh(true), scopedWorkspace ? loadWorkspaceDetail(scopedWorkspace) : null]).then(function () { return data; }); }).catch(function (error) { setResult({ ok: false, text: t("error.action", { error: translateError(t, error) }) }); throw error; }).finally(function () { inflightRef.current = false; setBusy(false); }); }
+      // 单行开关：先本地翻状态（不置全局 busy、不整页重拉），失败再回滚。
+      function patchSkillEnabled(rootKey: string, skillName: string, next: boolean) {
+        setSnapshot(function (previous: any) {
+          if (!previous || !previous.data) return previous;
+          var data = previous.data;
+          var roots = (data.roots || []).map(function (root: any) {
+            if (root.key !== rootKey) return root;
+            return Object.assign({}, root, { skills: (root.skills || []).map(function (skill: any) {
+              return skill.name === skillName ? Object.assign({}, skill, { enabled: next }) : skill;
+            }) });
+          });
+          return Object.assign({}, previous, { data: Object.assign({}, data, { roots: roots }) });
+        });
+      }
+      function toggleSkillQuiet(root: RootView, skill: SkillView, next: boolean, workspacePath?: string) {
+        var body = workspacePath ? { root: root.key, name: skill.name, workspace: workspacePath } : { root: root.key, name: skill.name };
+        var path: "/skill-reference" | "/enable" | "/disable" = gatekeeperOn
+          ? "/skill-reference"
+          : next ? "/enable" : "/disable";
+        if (gatekeeperOn) (body as any).referenced = next;
+        patchSkillEnabled(root.key, skill.name, next);
+        sessionApi(path, { method: "POST", headers: MUTATION_HEADERS, body: JSON.stringify(body) })
+          .then(function () { refresh(true); })
+          .catch(function (error: any) {
+            patchSkillEnabled(root.key, skill.name, !next);
+            setResult({ ok: false, text: t("error.action", { error: translateError(t, error) }) });
+          });
+      }
       function openDetail(root: RootView, skill: SkillView, workspacePath?: string) { setBusy(true); setDetail(null); setCopyState("idle"); setModal("detail"); sessionApi("/detail", { method: "POST", headers: MUTATION_HEADERS, body: JSON.stringify(workspacePath ? { root: root.key, name: skill.name, workspace: workspacePath } : { root: root.key, name: skill.name }) }).then(setDetail).catch(function (error) { setResult({ ok: false, text: t("error.action", { error: translateError(t, error) }) }); setModal(null); }).finally(function () { setBusy(false); }); }
       function openRootPath(root: RootView) {
         setRootPathValue(root.path || "");
@@ -916,7 +944,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
           if (action === "trash") setModal({ type: "trash-confirm", root: root.key, name: skill.name, workspace: workspacePath });
         } }),
         ];
-        skillActions.push(h("div", { className: "dssm-row-state" }, showStatus ? renderSkillStatusIcon(statusKey, statusTitle, cls) : null, showSwitch ? enableSwitch(enabled, (gatekeeperOn ? t("skill.referenceToggle") : t("skill.toggle")) + " " + skill.name, busy || root.enabled === false || (!enabled && skill.loadable === false), function () { gatekeeperOn ? post("/skill-reference", scoped({ root: root.key, name: skill.name, referenced: !enabled })) : post(enabled ? "/disable" : "/enable", scoped({ root: root.key, name: skill.name })); }) : null));
+        skillActions.push(h("div", { className: "dssm-row-state" }, showStatus ? renderSkillStatusIcon(statusKey, statusTitle, cls) : null, showSwitch ? enableSwitch(enabled, (gatekeeperOn ? t("skill.referenceToggle") : t("skill.toggle")) + " " + skill.name, root.enabled === false || (!enabled && skill.loadable === false), function () { toggleSkillQuiet(root, skill, !enabled, workspacePath); }) : null));
         var skillName = skill.declaredName || skill.name;
         var hasCustomNote = typeof skill.customNote === "string" && skill.customNote.trim().length > 0;
         var description = hasCustomNote ? skill.customNote : (skill.description || t("note.missing"));
@@ -1140,11 +1168,23 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
           return { member: member, skill: skill, missing: !skill, enabled: skill ? isSkillEnabled(skill) : false };
         });
       }
+      function patchLoadoutMembers(loadoutId: string, next: boolean) {
+        setLoadoutState(function (previous: any) {
+          if (!previous || !previous.data) return previous;
+          var data = previous.data;
+          var loadouts = (data.loadouts || []).map(function (item: Loadout) {
+            if (item.id !== loadoutId) return item;
+            return Object.assign({}, item, { members: item.members.map(function (member) { return Object.assign({}, member, { __optimisticEnabled: next }); }) });
+          });
+          return Object.assign({}, previous, { data: Object.assign({}, data, { loadouts: loadouts }) });
+        });
+      }
       function toggleLoadout(loadout: Loadout, enable: boolean) {
+        patchLoadoutMembers(loadout.id, enable);
         post("/loadout-toggle", { id: loadout.id, enabled: enable }, null).then(function (data) {
           setResult({ ok: true, text: t("loadout.toggled", { action: enable ? t("loadout.actionEnabled") : t("loadout.actionDisabled"), name: loadout.name, changed: data && typeof data.changed === "number" ? data.changed : 0, skipped: data && Array.isArray(data.skipped) ? data.skipped.length : 0 }) });
-          loadLoadouts();
-        }).catch(function () {});
+          loadLoadouts(true);
+        }).catch(function () { loadLoadouts(true); });
       }
       function applyLoadoutNow(loadout: Loadout) {
         post("/loadout-apply", { id: loadout.id, exclusive: loadoutExclusive[loadout.id] === true }, null).then(function (data) {
@@ -1539,55 +1579,38 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
       return h("section", { className: "dssm-section" }, content);
     }
 
-    // ── composer 编组控件（conversation.input.dock）──────────────────────────────
-    // 常驻输入框上方：收起态只显示「编组 · 名字 + 技能数」，展开是自绘 popover。
-    // 面板里的 <style> 带不到 composer，所以控件随自身渲染一份样式。
-    var DOCK_CSS = `.dssm-dock{display:flex;flex-direction:column-reverse;align-items:flex-start;gap:6px;min-width:0}
-.dssm-dock-toggle{display:inline-flex!important;align-items:center;gap:6px;max-width:100%;min-width:0;height:28px!important;padding:0 10px!important;border-radius:999px!important;font-size:12px!important;line-height:18px!important}
-.dssm-dock-toggle svg{flex:none}
-.dssm-dock-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dssm-dock-tag{flex:none}
-.dssm-dock-popover{box-sizing:border-box;width:min(320px,calc(100vw - 32px));padding:10px;display:flex;flex-direction:column;gap:8px;border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-bg-layer-platform,#1e1e1e));box-shadow:0 8px 24px var(--dsw-alias-shadow-overlay,rgba(0,0,0,.28))}
-.dssm-dock-section{display:flex;flex-direction:column;gap:2px;min-width:0}
-.dssm-dock-heading{padding:0 2px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary)}
-.dssm-dock-option{display:flex;align-items:center;gap:6px;width:100%;min-width:0;padding:5px 8px;border:0.5px solid transparent;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:18px;text-align:left;cursor:pointer}
-.dssm-dock-option:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12))}
-.dssm-dock-option.is-selected{border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-border-l3));background:var(--dsw-alias-state-business-tertiary,var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12)))}
-.dssm-dock-option:disabled{opacity:.5;cursor:default}
-.dssm-dock-check{display:inline-flex;align-items:center;justify-content:center;width:12px;min-width:12px;height:12px;color:var(--dsw-alias-link,var(--dsw-alias-label-primary))}
-.dssm-dock-option-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dssm-dock-skill{padding:1px 8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dssm-dock-more{padding:1px 8px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary)}
-.dssm-dock-empty{padding:4px 8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
-.dssm-dock-error{padding:4px 8px;font-size:11px;line-height:16px;color:var(--dsw-alias-state-error-primary)}
-.dssm-dock-actions{display:flex;justify-content:flex-end;padding-top:2px}`;
-
-    /** 带会话头的 API 调用：服务端优先用请求头解析作用域与会话。 */
-    function dockApiForSession(sessionId?: string | null) {
-      return function dockSessionApi<K extends keyof ApiRoutes>(path: K, options?: RequestInit): Promise<ApiRoutes[K]> {
-        var headers: Record<string, string> = Object.fromEntries(new Headers(options && options.headers).entries());
+    /** 按会话生成 API 调用（自动带上会话头）。 */
+    function dockApiForSession(sessionId: string) {
+      return function <K extends keyof ApiRoutes>(path: K, init?: RequestInit): Promise<ApiRoutes[K]> {
+        var headers: Record<string, string> = Object.fromEntries(new Headers(init?.headers as any).entries());
         if (sessionId) headers["x-dsh-skills-session"] = sessionId;
-        return callApi(path, Object.assign({}, options, { headers: headers }));
+        return callApi(path, Object.assign({}, init, { headers: headers }));
       };
     }
-
-    /** 宿主 Tag 原语（库里有就不抄第二份）；极老版本缺 Tag 时退成 span。 */
-    function DockTag(props: {className?: string; children?: React.ReactNode}) {
-      if (PrimitiveTag) return h(PrimitiveTag as any, { tone: "outline", className: props.className }, props.children);
-      return h("span", { className: props.className }, props.children);
-    }
-
-    /**
-     * 会话级编组控件。`inject` 拿到当前会话的 sessionId；`openManager` 由 apply 注入。
-     * 数据：GET /session-loadout（本会话的覆盖 + 生效技能）+ GET /loadouts（可选项）。
-     */
-    function LoadoutDock(props: {t?: Translate; sessionId?: string; openManager?: () => boolean}) {
+    // ── composer 编组 chip（conversation.input.left）──────────────────────────────
+    // 与宿主「权限」下拉同构：同一个 Menu 原语 + 同一套 trigger 样式（值抄自
+    // PermissionSelect.module.css，2026-11-02 对照安装包源码）。
+    var CHIP_CSS = [
+      '.dssm-chip{display:inline-flex;min-width:0}',
+      '.dssm-chip-trigger{border-radius:var(--dsw-radius-sm);min-width:0;max-width:220px;height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;outline:none;align-items:center;gap:4px;padding:0 4px 0 8px;font-size:13px;font-weight:500;line-height:20px;display:inline-flex;font-family:inherit}',
+      '.dssm-chip-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}',
+      '.dssm-chip-trigger:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}',
+      '.dssm-chip-trigger:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}',
+      '.dssm-chip-icon{flex:none;display:inline-flex}',
+      '.dssm-chip-icon svg{width:14px;height:14px}',
+      '.dssm-chip-label{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}',
+      '.dssm-chip-chevron{color:var(--dsw-alias-label-caption);flex:none;transition:transform .12s;display:inline-flex}',
+      '.dssm-chip-chevron.is-open{transform:rotate(180deg)}',
+      '.dssm-chip-manager{max-height:min(78vh,760px);overflow:auto}',
+      '@container (width<=460px){.dssm-chip-trigger:has(.dssm-chip-icon) .dssm-chip-label{display:none}}',
+    ].join('');
+    function LoadoutChip(props: {t?: Translate; sessionId?: string}) {
       var t = resolveT(props && props.t);
       var sessionId = props && typeof props.sessionId === "string" ? props.sessionId : "";
-      var snapshotState = react.useState<{loading: boolean; error: string | null; view: ApiRoutes["/session-loadout"] | null; loadouts: Loadout[]}>({ loading: true, error: null, view: null, loadouts: [] });
+      var snapshotState = react.useState<{ loading: boolean; error: string | null; view: ApiRoutes["/session-loadout"] | null; loadouts: Loadout[] }>({ loading: true, error: null, view: null, loadouts: [] });
       var snapshot = snapshotState[0], setSnapshot = snapshotState[1];
       var openState = react.useState(false), open = openState[0], setOpen = openState[1];
-      var busyState = react.useState(false), busy = busyState[0], setBusy = busyState[1];
+      var managerState = react.useState(false), managerOpen = managerState[0], setManagerOpen = managerState[1];
       var noticeState = react.useState<string | null>(null), notice = noticeState[0], setNotice = noticeState[1];
       var liveRef = react.useRef(true);
       var api = dockApiForSession(sessionId);
@@ -1603,7 +1626,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
           })
           .catch(function (error) {
             if (!liveRef.current) return;
-            setSnapshot(function (previous: {loading: boolean; error: string | null; view: ApiRoutes["/session-loadout"] | null; loadouts: Loadout[]}) {
+            setSnapshot(function (previous: { loading: boolean; error: string | null; view: ApiRoutes["/session-loadout"] | null; loadouts: Loadout[] }) {
               return { loading: false, error: translateError(t, error), view: previous ? previous.view : null, loadouts: previous ? previous.loadouts : [] };
             });
           });
@@ -1614,89 +1637,64 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
         return function () { liveRef.current = false; };
       }, [sessionId]);
 
-      function choose(value: string) {
-        if (!sessionId || busy) return;
-        setBusy(true);
-        setNotice(null);
-        api("/session-loadout", { method: "POST", headers: MUTATION_HEADERS, body: JSON.stringify({ sessionId: sessionId, loadoutId: value }) })
-          .then(function () {
-            if (!liveRef.current) return;
-            setBusy(false);
-            setOpen(false);
-            void reload();
-          })
-          .catch(function (error) {
-            if (!liveRef.current) return;
-            setBusy(false);
-            setNotice(translateError(t, error));
-          });
-      }
-
-      function openManager() {
-        var opened = typeof props.openManager === "function" ? props.openManager() : false;
-        if (!opened) setNotice(t("loadout.dock.manageHint"));
-      }
-
       var view = snapshot.view;
       var effective = view && view.effective ? view.effective : null;
       var current = effective && effective.loadout ? effective.loadout : null;
-      var skills = effective && Array.isArray(effective.skills) ? effective.skills : [];
       var stored = view ? view.loadoutId : null;
       // 覆盖值：null = 未覆盖（显示生效值）、"" = 显式不加载、id = 选中。
       var selected = stored === null || stored === undefined ? (current ? current.id : "") : stored;
-      var caption = current ? t("loadout.dock.current", { name: current.name }) : t("loadout.dock.none");
-      var options = [{ id: "", name: t("loadout.dock.noLoadout") } as {id: string; name: string}].concat(
-        snapshot.loadouts.map(function (item) { return { id: item.id, name: item.name }; })
-      );
-      var sourceLabel = effective && effective.source === "session" ? t("loadout.dock.source.session") : t("loadout.dock.source.scope");
+      var caption = current ? current.name : t("loadout.dock.none");
 
-      var popover = open ? h("div", { className: "dssm-dock-popover", role: "dialog", "aria-label": t("loadout.dock.title") },
-        h("div", { className: "dssm-dock-section" },
-          h("span", { className: "dssm-dock-heading" }, t("loadout.dock.pick")),
-          options.map(function (option) {
-            var checked = option.id === selected;
-            return h("button", {
-              key: option.id || "none",
-              type: "button",
-              role: "menuitemradio",
-              "aria-checked": checked,
-              className: "dssm-dock-option" + (checked ? " is-selected" : ""),
-              disabled: busy,
-              onClick: function () { choose(option.id); },
-            },
-              h("span", { className: "dssm-dock-check" }, checked ? uiIcon("check", 12) : null),
-              h("span", { className: "dssm-dock-option-name" }, option.name));
-          })),
-        h("div", { className: "dssm-dock-section" },
-          h("span", { className: "dssm-dock-heading" }, t("loadout.dock.effective", { count: skills.length }) + (current ? " · " + sourceLabel : "")),
-          skills.length
-            ? skills.slice(0, 8).map(function (name) { return h("div", { key: name, className: "dssm-dock-skill" }, name); })
-            : h("div", { className: "dssm-dock-empty" }, t("loadout.dock.noSkills")),
-          skills.length > 8 ? h("div", { className: "dssm-dock-more" }, t("loadout.dock.more", { count: skills.length - 8 })) : null),
-        snapshot.error ? h("div", { className: "dssm-dock-error" }, t("loadout.dock.loadFailed", { error: snapshot.error })) : null,
-        notice ? h("div", { className: "dssm-dock-error" }, notice) : null,
-        h("div", { className: "dssm-dock-actions" },
-          h(PrimitiveButton, { variant: "outline", size: "sm", className: "dssm-dock-manage", onClick: openManager }, t("loadout.dock.manage")))) : null;
+      function choose(value: string) {
+        if (!sessionId || !value) return;
+        if (value === "__manage__") {
+          setOpen(false);
+          setManagerOpen(true);
+          return;
+        }
+        setOpen(false);
+        setNotice(null);
+        api("/session-loadout", { method: "POST", headers: MUTATION_HEADERS, body: JSON.stringify({ sessionId: sessionId, loadoutId: value === "__none__" ? "" : value }) })
+          .then(function () { if (liveRef.current) void reload(); })
+          .catch(function (error: any) { if (liveRef.current) setNotice(translateError(t, error)); });
+      }
 
-      return h("div", { className: "dssm-dock", key: "loadout-dock" },
-        h("style", { key: "css" }, DOCK_CSS),
-        h(PrimitiveButton, {
-          variant: "outline",
-          size: "sm",
-          className: "dssm-dock-toggle",
-          "aria-expanded": open,
-          "aria-label": t("loadout.dock.label"),
-          title: t("loadout.dock.title"),
-          disabled: busy || !sessionId,
-          onClick: function () {
-            if (!sessionId) return;
-            var next = !open;
-            setOpen(next);
-            setNotice(null);
-            if (next) void reload();
-          },
-        }, [uiIcon("layers", 13), h("span", { key: "label", className: "dssm-dock-label" }, caption), h(DockTag, { key: "count", className: "dssm-dock-tag" }, t(countKey("loadout.dock.skills", skills.length), { count: skills.length }))]),
-        popover);
+      var items: any[] = snapshot.loadouts.map(function (item: Loadout) {
+        return { id: item.id, label: item.name };
+      });
+      items.push({ type: "separator", id: "sep-none" });
+      items.push({ id: "__none__", label: t("loadout.dock.noLoadout") });
+      items.push({ type: "separator", id: "sep-manage" });
+      items.push({ id: "__manage__", label: t("loadout.dock.manage"), icon: uiIcon("pencil", 14) });
+
+      var anchor = h("button", {
+        type: "button",
+        className: "dssm-chip-trigger",
+        "aria-label": t("loadout.dock.label", { name: caption }),
+        title: t("loadout.dock.title"),
+        "aria-expanded": open,
+        disabled: !sessionId,
+        onClick: function () { setOpen(!open); },
+      }, [
+        h("span", { key: "icon", className: "dssm-chip-icon", "aria-hidden": "true" }, uiIcon("layers", 14)),
+        h("span", { key: "label", className: "dssm-chip-label" }, caption),
+        h("span", { key: "chev", className: "dssm-chip-chevron" + (open ? " is-open" : ""), "aria-hidden": "true" }, h((primitives as any).IconChevronDownOutlineRegular, {})),
+      ]);
+
+      var manager = managerOpen ? h(Modal, {
+        key: "manager",
+        title: t("title"),
+        closeLabel: t("btn.close"),
+        className: "dssm-chip-manager",
+        onClose: function () { setManagerOpen(false); },
+      }, h(SkillManagerSection, { t: t, useSessions: function () { return sessionId; } })) : null;
+
+      return h("div", { className: "dssm-chip", key: "loadout-chip" }, [
+        h("style", { key: "css" }, CHIP_CSS),
+        h(Menu, { key: "menu", open: open, items: items, selectedId: selected, side: "top", portal: true, onSelect: choose, onClose: function () { setOpen(false); }, anchor: anchor }),
+        notice ? h("div", { key: "notice", className: "dssm-dock-error" }, notice) : null,
+        manager,
+      ]);
     }
 
     // 目录选择：桌面端由 preload 暴露系统文件夹对话框；Web/远程端退到工作区 UI 的选择器。
@@ -1739,14 +1737,14 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
       installSettingsNavIcon(ctx, function () { return ctx.locale.bind(NS)("title"); });
       // composer 常驻控件：槽位是 session-scoped list，inject(sessionId) 是本功能的立足点。
       // 旧宿主没有声明该槽位时 inject 静默不执行，控件自然缺席，不影响其他入口。
-      ctx.slots.inject("conversation.input.dock", function () {
+      ctx.slots.inject("conversation.input.left", function () {
         return ctx.slots.register({
-          name: "conversation.input.dock",
+          name: "conversation.input.left",
           id: "loadout",
-          order: 30,
+          order: 20,
           locale: NS,
-          inject: function (sessionId: string) { return { sessionId: sessionId, openManager: openManagerPanel }; },
-        }, LoadoutDock as any);
+          inject: function (sessionId: string) { return { sessionId: sessionId }; },
+        }, LoadoutChip as any);
       });
       ctx.slots.inject("settings.section", function () { return ctx.slots.register({ name: "settings.section", id: "loadout", order: 25, label: function () { return ctx.locale.bind(NS)("title"); }, icon: "skill", locale: NS }, SkillManagerSection); });
       sidebarController = setupSidebarEntry(ctx, {

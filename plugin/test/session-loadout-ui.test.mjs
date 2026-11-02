@@ -105,24 +105,23 @@ try {
   });
 
   // 宿主只在槽位被声明时才运行 inject 回调；这里手动触发一次。
-  const dockInjection = injections.get("conversation.input.dock");
-  assert.equal(typeof dockInjection, "function", "composer 控件订阅了 conversation.input.dock");
-  dockInjection();
-  const dock = registrations.find((item) => item.options.name === "conversation.input.dock");
-  assert.ok(dock, "注册了 conversation.input.dock");
-  assert.equal(dock.options.id, "loadout", "list 槽位需要稳定的 id");
-  assert.equal(dock.options.order, 30, "排在官方 queue(20) 之后");
-  assert.equal(dock.options.locale, "loadout", "沿用插件 locale 命名空间");
-  assert.equal(typeof dock.options.inject, "function", "composer 控件靠 inject 拿会话 id");
-  const injected = dock.options.inject(SESSION);
+  const chipInjection = injections.get("conversation.input.left");
+  assert.equal(typeof chipInjection, "function", "composer 控件订阅了 conversation.input.left（权限旁边那排）");
+  chipInjection();
+  const chip = registrations.find((item) => item.options.name === "conversation.input.left");
+  assert.ok(chip, "注册了 conversation.input.left");
+  assert.equal(chip.options.id, "loadout", "list 槽位需要稳定的 id");
+  assert.equal(chip.options.order, 20, "排在官方 queue(20) 同档、权限之后");
+  assert.equal(chip.options.locale, "loadout", "沿用插件 locale 命名空间");
+  assert.equal(typeof chip.options.inject, "function", "composer 控件靠 inject 拿会话 id");
+  const injected = chip.options.inject(SESSION);
   assert.equal(injected.sessionId, SESSION, "inject 收到当前会话 id");
-  assert.equal(typeof injected.openManager, "function", "inject 提供「在插件里管理」入口");
 
   const t = (key, params = {}) => (client.DICT.zh[key] || key).replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? "{" + name + "}"));
   let tree;
   function render() {
     cursor = 0;
-    tree = dock.component({ t, ...injected });
+    tree = chip.component({ t, ...injected });
   }
   function linkedNodes(value, out = []) {
     if (value == null || typeof value === "boolean" || typeof value === "string" || typeof value === "number") return out;
@@ -144,68 +143,57 @@ try {
     render();
   };
 
-  // ── 收起态：有编组 + 技能数 ────────────────────────────────────────────────
+  // ── 收起态：与宿主权限 chip 同构的 trigger ────────────────────────────────
   await settle();
-  const toggle = find((node) => node.props.className === "dssm-dock-toggle");
-  assert.ok(toggle, "收起态是一个按钮");
-  assert.equal(toggle.props["aria-label"], t("loadout.dock.label"), "按钮有本地化可访问名");
-  assert.equal(textOf(toggle).includes(t("loadout.dock.current", { name: "研发" })), true, "有编组时显示「编组 · 名字」");
-  const tag = nodes(toggle).find((node) => node.props["data-primitive"] === "tag");
-  assert.ok(tag, "技能数用宿主 Tag 原语");
-  assert.equal(String(tag.children), t("loadout.dock.skills.other", { count: 10 }), "Tag 显示当前技能数");
+  const trigger = find((node) => node.props.className === "dssm-chip-trigger");
+  assert.ok(trigger, "收起态是一个 chip 按钮");
+  assert.equal(trigger.props["aria-label"], t("loadout.dock.label", { name: "研发" }), "按钮有本地化可访问名");
+  assert.equal(textOf(trigger).includes("研发"), true, "有编组时直接显示编组名");
+  assert.ok(nodes(trigger).some((node) => node.props.className === "dssm-chip-icon"), "带图标位（与权限 chip 一致）");
+  assert.ok(nodes(trigger).some((node) => node.props.className === "dssm-chip-chevron"), "带下拉箭头");
   assert.ok(calls.some((call) => call.path.startsWith("/session-loadout?sessionId=") && call.method === "GET"), "按会话拉 GET /session-loadout");
   assert.equal(calls.find((call) => call.path.startsWith("/session-loadout")).headers["x-dsh-skills-session"], SESSION, "请求带会话头");
 
-  // ── 展开：单选列表（含「不加载」）+ 生效技能清单（最多 8 行 + 还有 N 张）────
-  toggle.props.onClick();
+  // ── 展开：编组列表 + 不加载 + 管理 ────────────────────────────────────────
+  trigger.props.onClick();
   render();
-  const options = nodes().filter((node) => node.props.role === "menuitemradio");
-  assert.equal(options.length, 3, "两个编组 + 不加载");
-  const selectedOption = options.find((node) => node.props["aria-checked"] === true);
-  assert.ok(textOf(selectedOption).includes("研发"), "当前会话编组被选中");
-  assert.ok(options.some((node) => textOf(node).includes(t("loadout.dock.noLoadout"))), "列表含「不加载」");
-  const skillRows = nodes().filter((node) => node.props.className === "dssm-dock-skill");
-  assert.deepEqual(skillRows.map((node) => node.children[0]), TEN_SKILLS.slice(0, 8), "生效技能名最多列 8 行");
-  assert.ok(nodes().some((node) => node.props.className === "dssm-dock-more" && String(node.children[0]).includes("2")), "超出部分显示还有 N 张");
+  const items = nodes().filter((node) => node.type === "button" && node.props.onClick && String(textOf(node)).length > 0);
+  assert.ok(textOf(tree).includes("研发") && textOf(tree).includes("写作"), "列出两个编组");
+  assert.ok(textOf(tree).includes(t("loadout.dock.noLoadout")), "列表含「不加载」");
+  assert.ok(textOf(tree).includes(t("loadout.dock.manage")), "列表含「管理编组与技能」");
 
-  // ── 切到「不加载」：POST { loadoutId: "" }，成功后重新拉取并显示未加载 ───────
-  const noneOption = options.find((node) => textOf(node).includes(t("loadout.dock.noLoadout")));
-  noneOption.props.onClick();
+  // ── 切到「不加载」：POST { loadoutId: "" } ─────────────────────────────────
+  const noneItem = items.find((node) => textOf(node).includes(t("loadout.dock.noLoadout")));
+  noneItem.props.onClick();
   await settle();
   const postNone = calls.filter((call) => call.path === "/session-loadout" && call.method === "POST").at(-1);
   assert.ok(postNone, "切换编组发起 POST /session-loadout");
   assert.deepEqual(postNone.body, { sessionId: SESSION, loadoutId: "" }, "「不加载」写显式空串");
   assert.match(String(postNone.headers["x-dsh-loadout"]), /1/, "POST 带变更标记头");
-  const noneToggle = find((node) => node.props.className === "dssm-dock-toggle");
-  assert.equal(textOf(noneToggle).includes(t("loadout.dock.none")), true, "未加载时显示「未加载编组」");
-  assert.equal(String(nodes(noneToggle).find((node) => node.props["data-primitive"] === "tag").children), t("loadout.dock.skills.other", { count: 0 }));
-
-  // 重新展开时「不加载」被选中，生效技能清单为空。
-  find((node) => node.props.className === "dssm-dock-toggle").props.onClick();
-  render();
-  const noneSelected = nodes().filter((node) => node.props.role === "menuitemradio").find((node) => node.props["aria-checked"] === true);
-  assert.ok(textOf(noneSelected).includes(t("loadout.dock.noLoadout")));
-  assert.ok(nodes().some((node) => node.props.className === "dssm-dock-empty" && node.children[0] === t("loadout.dock.noSkills")), "没有生效技能时给空态");
+  const noneTrigger = find((node) => node.props.className === "dssm-chip-trigger");
+  assert.equal(textOf(noneTrigger).includes(t("loadout.dock.none")), true, "未加载时显示「未加载编组」");
 
   // ── 选回一个编组：POST 写入 id ─────────────────────────────────────────────
-  const back = nodes().filter((node) => node.props.role === "menuitemradio").find((node) => textOf(node).includes("写作"));
+  find((node) => node.props.className === "dssm-chip-trigger").props.onClick();
+  render();
+  const back = nodes().find((node) => node.type === "button" && textOf(node) === "写作");
   back.props.onClick();
   await settle();
   const postBack = calls.filter((call) => call.path === "/session-loadout" && call.method === "POST").at(-1);
   assert.deepEqual(postBack.body, { sessionId: SESSION, loadoutId: "lo2" }, "选编组写入它的 id");
 
-  // ── 「在插件里管理」：切到插件的侧栏面板 ───────────────────────────────────
-  find((node) => node.props.className === "dssm-dock-toggle").props.onClick();
+  // ── 「管理编组与技能」：就地弹模态框，不依赖侧栏 ───────────────────────────
+  find((node) => node.props.className === "dssm-chip-trigger").props.onClick();
   render();
-  const manage = find((node) => node.props.className === "dssm-dock-manage");
-  assert.ok(manage, "popover 里有「在插件里管理」");
-  assert.equal(manage.children[0], t("loadout.dock.manage"));
+  const manage = nodes().find((node) => node.type === "button" && textOf(node).includes(t("loadout.dock.manage")));
   manage.props.onClick();
-  assert.deepEqual(layoutCalls, ["loadout"], "点管理切到插件面板");
+  await settle();
+  const dialog = find((node) => node.props.role === "dialog" || node.props["data-modal"] === "dialog");
+  assert.ok(dialog, "管理入口直接就地在会话里弹出管理面板");
 
   // 样式随控件自身渲染（composer 带不到面板里的 <style>）。
   const css = nodes().filter((node) => node.type === "style").map((node) => node.children.join("")).join("");
-  assert.ok(css.includes(".dssm-dock-popover"), "控件自带样式");
+  assert.ok(css.includes(".dssm-chip-trigger"), "控件自带样式");
   assert.doesNotMatch(css, /#1677ff/i, "不写死颜色");
 
   console.log("session-loadout ui ok");
