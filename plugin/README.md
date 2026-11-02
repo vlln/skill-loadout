@@ -27,6 +27,8 @@ dsh 的侧栏插件。单个技能的安装、发现、启停它都做（这部�
 
 与相邻能力的区别：插件管理器（Plugins 页）管的是插件包装没装，loadout 管的是已装技能在当前任务里生不生效；"分类"是浏览时的组织位面，loadout 是执行时的编组位面。
 
+两件结构性的事：日常面对的不再是技能清单而是几个编组（管理复杂度随任务类型数增长，不随技能数）；装与用被拆开，装只是入库，囤积不再有上下文代价。展开见 [docs/why-loadout.md](docs/why-loadout.md)。
+
 ## 安装
 
 插件在 [vlln/skill-loadout](https://github.com/vlln/skill-loadout) 仓库的 `plugin/` 子目录，产物已入库，git 源一行装：
