@@ -6,7 +6,6 @@
 
 **用 `atlas` 定位，用 `loadout` 组装**：前者是判断与地图，后者是一个任务实际加载的那几份。项目名取后者——这个仓库产出的是"可组装的一组"，不是一个工具。
 
-
 [![Agent Skills](https://img.shields.io/badge/Agent_Skills-规范-4D6BFE?style=flat-square)](https://agentskills.io)
 
 ## 当前状态
@@ -37,6 +36,8 @@ skit check
 ```
 
 本地开发时克隆后用 `./skills/<名>` 直装。五份互不引用，装一份也能用。
+
+跑通的样子：`skit list` 里出现刚装的几份，且 `skit check` 没有指向它们的报错。
 
 ## 结构
 
