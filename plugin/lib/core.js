@@ -1675,7 +1675,7 @@ function defaultManagerState() {
     disabledSkills[root.key] = [];
     enabledSkills[root.key] = [];
   }
-  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: /* @__PURE__ */ Object.create(null), categoryMembers: /* @__PURE__ */ Object.create(null), categoryOrder: /* @__PURE__ */ Object.create(null), customNotes: /* @__PURE__ */ Object.create(null) };
+  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: /* @__PURE__ */ Object.create(null), categoryMembers: /* @__PURE__ */ Object.create(null), categoryOrder: /* @__PURE__ */ Object.create(null), customNotes: /* @__PURE__ */ Object.create(null), loadouts: [], activeLoadout: /* @__PURE__ */ Object.create(null) };
 }
 function validStateSkillName(name) {
   return validDiscoveryName(name);
@@ -1693,6 +1693,38 @@ function validPolicyLists(value, allowMissing = false) {
       continue;
     if (!Array.isArray(list) || list.some((name) => !validStateSkillName(name)))
       return false;
+  }
+  return true;
+}
+const LOADOUT_NAME_MAX = 24;
+const LOADOUT_NOTE_MAX = 140;
+const LOADOUT_ID_RE = /^[a-z0-9]{8,32}$/;
+const LOADOUT_SCOPE_RE = /^project:[a-f0-9]{16}(,[a-f0-9]{16})*$/;
+function validLoadoutScopeKey(scope) {
+  return scope === "user" || typeof scope === "string" && LOADOUT_SCOPE_RE.test(scope);
+}
+function validLoadouts(value) {
+  if (value === void 0) return true;
+  if (!Array.isArray(value)) return false;
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    const loadout = item;
+    if (typeof loadout.id !== "string" || !LOADOUT_ID_RE.test(loadout.id)) return false;
+    if (typeof loadout.name !== "string" || !loadout.name.trim() || loadout.name.length > LOADOUT_NAME_MAX) return false;
+    if (loadout.note !== void 0 && loadout.note !== null && (typeof loadout.note !== "string" || loadout.note.length > LOADOUT_NOTE_MAX)) return false;
+    if (!Array.isArray(loadout.members)) return false;
+    for (const member of loadout.members) {
+      if (!member || typeof member !== "object" || Array.isArray(member)) return false;
+      if (typeof member.root !== "string" || !member.root || !validStateSkillName(member.name)) return false;
+    }
+  }
+  return true;
+}
+function validActiveLoadout(value) {
+  if (value === void 0) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  for (const [scope, id] of Object.entries(value)) {
+    if (!validLoadoutScopeKey(scope) || typeof id !== "string" || !LOADOUT_ID_RE.test(id)) return false;
   }
   return true;
 }
@@ -1804,6 +1836,8 @@ function normalizeManagerState(value) {
   normalized.categoryMembers = normalizeCategoryMembers(value.categoryMembers, normalized.categories);
   normalized.categoryOrder = normalizeCategoryOrder(value.categoryOrder, normalized.categories);
   normalized.customNotes = normalizeCustomNotes(value.customNotes);
+  normalized.loadouts = normalizeLoadouts(value.loadouts);
+  normalized.activeLoadout = normalizeActiveLoadout(value.activeLoadout, normalized.loadouts);
   return normalized;
 }
 const CATEGORY_NAME_MAX = 24;
@@ -1874,15 +1908,58 @@ function normalizeCategoryOrder(value, categories) {
   }
   return order;
 }
+function normalizeLoadouts(value) {
+  const loadouts = [];
+  if (!Array.isArray(value)) return loadouts;
+  const seen = /* @__PURE__ */ new Set();
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const id = typeof item.id === "string" ? item.id : "";
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    if (!LOADOUT_ID_RE.test(id) || !name || name.length > LOADOUT_NAME_MAX || seen.has(id)) continue;
+    seen.add(id);
+    const note = typeof item.note === "string" ? item.note.trim() : "";
+    const members = [];
+    const seenMembers = /* @__PURE__ */ new Set();
+    if (Array.isArray(item.members)) {
+      for (const member of item.members) {
+        if (!member || typeof member !== "object" || Array.isArray(member)) continue;
+        const root = typeof member.root === "string" ? member.root : "";
+        const memberName = typeof member.name === "string" ? member.name : "";
+        const key = `${root}
+${memberName}`;
+        if (!root || !validStateSkillName(memberName) || seenMembers.has(key)) continue;
+        seenMembers.add(key);
+        members.push({ root, name: memberName });
+      }
+    }
+    loadouts.push({ id, name, note: note && note.length <= LOADOUT_NOTE_MAX ? note : null, members });
+  }
+  return loadouts;
+}
+function normalizeActiveLoadout(value, loadouts) {
+  const active = /* @__PURE__ */ Object.create(null);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return active;
+  const known = new Set(loadouts.map((item) => item.id));
+  for (const [scope, id] of Object.entries(value)) {
+    if (validLoadoutScopeKey(scope) && typeof id === "string" && known.has(id)) active[scope] = id;
+  }
+  return active;
+}
 async function readManagerState() {
   try {
     const raw = await fs.readFile(managerStatePath(), "utf8");
     const parsed = migrateManagerStateDocument(JSON.parse(raw));
     if (!validManagerStateDocument(parsed))
       throw codedError("invalid manager state schema", "error.state.invalid");
+    const loadoutWarning = validLoadouts(parsed.loadouts) && validActiveLoadout(parsed.activeLoadout) ? null : {
+      code: "warning.loadout.invalid",
+      params: { path: managerStatePath() },
+      error: `loadout \u7F16\u7EC4\u6570\u636E\u65E0\u6548\uFF0C\u5DF2\u4E22\u5F03\u8BE5\u6BB5: ${managerStatePath()}`
+    };
     return {
       state: normalizeManagerState(parsed),
-      warning: null,
+      warning: loadoutWarning,
       writable: true
     };
   } catch (caught) {
@@ -2315,6 +2392,225 @@ async function setCategoryEnabled(key, categoryId, enabled, log, options = {}) {
     for (const name of changedNames)
       log(enabled ? "policy-enable" : "policy-disable", `${enabled ? "\u542F\u7528" : "\u505C\u7528"} ${ready.rootKey}/${name}\uFF08\u672C\u5730\u7B56\u7565\uFF0C\u6E90\u6587\u4EF6\u4E0D\u53D8\uFF09`);
   return { root: ready.rootKey, categoryId: categoryId || null, enabled: enabled === true, changed: changedNames.length, skipped };
+}
+function loadoutError(code, error, params) {
+  return { ok: false, code, error, ...params ? { params } : {} };
+}
+async function writableLoadoutState() {
+  const current = await readManagerState();
+  if (current.writable === false) return invalidManagerStateWrite();
+  const state2 = current.state;
+  const loadouts = Array.isArray(state2.loadouts) ? state2.loadouts : state2.loadouts = [];
+  const activeLoadout = state2.activeLoadout && typeof state2.activeLoadout === "object" && !Array.isArray(state2.activeLoadout) ? state2.activeLoadout : state2.activeLoadout = /* @__PURE__ */ Object.create(null);
+  return { state: state2, loadouts, activeLoadout };
+}
+function findLoadout(loadouts, id) {
+  return loadouts.find((item) => item.id === id);
+}
+async function loadoutScopeKey(options = {}) {
+  const cwds = (Array.isArray(options.projectCwds) ? options.projectCwds : []).filter((cwd) => typeof cwd === "string" && isAbsolute(cwd));
+  if (!cwds.length) return "user";
+  const roots = await projectRoots(cwds);
+  const ids = [...new Set(roots.map((root) => root.key.split(":").pop() || ""))].filter(Boolean).sort();
+  return ids.length ? `project:${ids.join(",")}` : "user";
+}
+async function checkedLoadoutMember(root, name, options = {}) {
+  const rootKey = typeof root === "string" ? root : "";
+  const definition = rootKey ? await resolvedCategoryRoot(rootKey, options) : null;
+  if (!definition) return loadoutError("error.loadout.root", `\u6280\u80FD\u6765\u6E90\u4E0D\u5B58\u5728: ${rootKey}`, { root: rootKey });
+  const skillName = typeof name === "string" ? name : "";
+  if (!validStateSkillName(skillName))
+    return loadoutError("error.skill.notFound", `\u6280\u80FD\u4E0D\u5B58\u5728: ${skillName}`, { name: skillName });
+  const entry = await resolveEntry(definition, skillName);
+  if (!entry)
+    return loadoutError("error.skill.notFound", `\u6280\u80FD\u4E0D\u5B58\u5728: ${skillName}`, { name: skillName });
+  return { root: definition.key, name: skillName };
+}
+async function createLoadout(name, note, members, log, options = {}) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const label = String(name || "").trim();
+  if (!label || label.length > LOADOUT_NAME_MAX)
+    return loadoutError("error.loadout.name", "\u7F16\u7EC4\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u4E0D\u80FD\u8D85\u8FC7 24 \u4E2A\u5B57\u7B26");
+  if (ready.loadouts.some((item) => item.name === label))
+    return loadoutError("error.loadout.duplicate", `\u5DF2\u6709\u540C\u540D\u7F16\u7EC4: ${label}`, { name: label });
+  const text = note === void 0 || note === null ? "" : String(note).trim();
+  if (text.length > LOADOUT_NOTE_MAX)
+    return loadoutError("error.loadout.noteTooLong", `\u7F16\u7EC4\u5907\u6CE8\u8FC7\u957F\uFF08\u6700\u591A ${LOADOUT_NOTE_MAX} \u4E2A\u5B57\u7B26\uFF09`, { max: LOADOUT_NOTE_MAX });
+  const initial = [];
+  for (const member of Array.isArray(members) ? members : []) {
+    const checked = await checkedLoadoutMember(member && member.root, member && member.name, options);
+    if ("ok" in checked) return checked;
+    if (!initial.some((item) => item.root === checked.root && item.name === checked.name))
+      initial.push(checked);
+  }
+  const loadout = { id: randomBytes(8).toString("hex"), name: label, note: text || null, members: initial };
+  ready.loadouts.push(loadout);
+  await writeManagerState(ready.state);
+  if (log) log("loadout-create", `\u521B\u5EFA\u7F16\u7EC4 ${label}\uFF08${initial.length} \u4E2A\u6210\u5458\uFF09`);
+  return { loadout };
+}
+async function renameLoadout(id, name, log) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id });
+  const label = String(name || "").trim();
+  if (!label || label.length > LOADOUT_NAME_MAX)
+    return loadoutError("error.loadout.name", "\u7F16\u7EC4\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u4E0D\u80FD\u8D85\u8FC7 24 \u4E2A\u5B57\u7B26");
+  if (ready.loadouts.some((item) => item !== loadout && item.name === label))
+    return loadoutError("error.loadout.duplicate", `\u5DF2\u6709\u540C\u540D\u7F16\u7EC4: ${label}`, { name: label });
+  loadout.name = label;
+  await writeManagerState(ready.state);
+  if (log) log("loadout-rename", `\u91CD\u547D\u540D\u7F16\u7EC4 ${id} \u4E3A ${label}`);
+  return { loadout };
+}
+async function deleteLoadout(id, log) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id });
+  ready.state.loadouts = ready.loadouts.filter((item) => item.id !== id);
+  for (const [scope, active] of Object.entries(ready.activeLoadout)) {
+    if (active === id) delete ready.activeLoadout[scope];
+  }
+  await writeManagerState(ready.state);
+  if (log) log("loadout-delete", `\u5220\u9664\u7F16\u7EC4 ${loadout.name}\uFF08${id}\uFF09\uFF0C\u6280\u80FD\u672C\u8EAB\u4E0D\u53D7\u5F71\u54CD`);
+  return { id };
+}
+async function setLoadoutNote(id, note, log) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id });
+  const text = String(note || "").trim();
+  if (text.length > LOADOUT_NOTE_MAX)
+    return loadoutError("error.loadout.noteTooLong", `\u7F16\u7EC4\u5907\u6CE8\u8FC7\u957F\uFF08\u6700\u591A ${LOADOUT_NOTE_MAX} \u4E2A\u5B57\u7B26\uFF09`, { max: LOADOUT_NOTE_MAX });
+  loadout.note = text || null;
+  await writeManagerState(ready.state);
+  if (log) log("loadout-note", `\u7F16\u7EC4 ${loadout.name} \u66F4\u65B0\u5907\u6CE8: ${text ? `"${text}"` : "\u5DF2\u6E05\u7A7A"}`);
+  return { id, note: loadout.note };
+}
+async function addToLoadout(id, root, name, log, options = {}) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id });
+  const checked = await checkedLoadoutMember(root, name, options);
+  if ("ok" in checked) return checked;
+  if (loadout.members.some((item) => item.root === checked.root && item.name === checked.name))
+    return { id, root: checked.root, name: checked.name, added: false };
+  loadout.members.push(checked);
+  await writeManagerState(ready.state);
+  if (log) log("loadout-add", `\u7F16\u7EC4 ${loadout.name} \u52A0\u5165 ${checked.root}/${checked.name}`);
+  return { id, root: checked.root, name: checked.name, added: true };
+}
+async function removeFromLoadout(id, root, name, log) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id });
+  const rootKey = String(root || "");
+  const skillName = String(name || "");
+  const before = loadout.members.length;
+  loadout.members = loadout.members.filter((item) => !(item.root === rootKey && item.name === skillName));
+  const removed = loadout.members.length !== before;
+  if (removed) {
+    await writeManagerState(ready.state);
+    if (log) log("loadout-remove", `\u7F16\u7EC4 ${loadout.name} \u79FB\u51FA ${rootKey}/${skillName}`);
+  }
+  return { id, root: rootKey, name: skillName, removed };
+}
+async function setLoadoutEnabled(id, enabled, log, options = {}) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id });
+  const skipped = [];
+  const changedNames = [];
+  for (const member of loadout.members) {
+    const root = await resolvedCategoryRoot(member.root, options);
+    if (!root) {
+      skipped.push(`${member.root}/${member.name}`);
+      continue;
+    }
+    const result = await applyPolicySkillEnabled(root, member.name, enabled, ready.state);
+    if (result && result.ok === false) {
+      skipped.push(`${member.root}/${member.name}`);
+      continue;
+    }
+    changedNames.push(`${member.root}/${member.name}`);
+  }
+  if (changedNames.length) await writeManagerState(ready.state);
+  if (log)
+    for (const name of changedNames)
+      log(enabled ? "policy-enable" : "policy-disable", `${enabled ? "\u542F\u7528" : "\u505C\u7528"} ${name}\uFF08\u672C\u5730\u7B56\u7565\uFF0C\u6E90\u6587\u4EF6\u4E0D\u53D8\uFF09`);
+  return { id, enabled: enabled === true, changed: changedNames.length, skipped };
+}
+async function applyLoadout(id, applyOptions = {}, log, options = {}) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id });
+  const exclusive = applyOptions.exclusive === true;
+  const scopeKey = await loadoutScopeKey(options);
+  const memberKeys = new Set(loadout.members.map((member) => `${member.root}/${member.name}`));
+  const skipped = [];
+  const changedNames = [];
+  let disabledOthers = 0;
+  if (exclusive) {
+    const candidateRoots = [...userRoots(), ...await projectRoots(options.projectCwds)].filter((root) => root.toggleable !== false);
+    const disabling = [];
+    for (const root of candidateRoots) {
+      const { entries } = await scanEntries(root);
+      for (const entry of entries) {
+        if (memberKeys.has(`${root.key}/${entry.name}`)) continue;
+        if (entry.loadable === false) continue;
+        const policy = effectiveSkillPolicy({ state: ready.state, writable: true, warning: null }, root, entry);
+        if (policy.enabled) disabling.push({ root, name: entry.name });
+      }
+    }
+    for (const item of disabling) {
+      const result = await applyPolicySkillEnabled(item.root, item.name, false, ready.state);
+      if (result && result.ok === false) continue;
+      disabledOthers += 1;
+      changedNames.push(`${item.root.key}/${item.name}`);
+    }
+  }
+  let applied = 0;
+  for (const member of loadout.members) {
+    const root = await resolvedCategoryRoot(member.root, options);
+    if (!root) {
+      skipped.push(`${member.root}/${member.name}`);
+      continue;
+    }
+    const result = await applyPolicySkillEnabled(root, member.name, true, ready.state);
+    if (result && result.ok === false) {
+      skipped.push(`${member.root}/${member.name}`);
+      continue;
+    }
+    applied += 1;
+    changedNames.push(`${member.root}/${member.name}`);
+  }
+  ready.activeLoadout[scopeKey] = id;
+  await writeManagerState(ready.state);
+  if (log)
+    log("loadout-apply", `\u5E94\u7528\u7F16\u7EC4 ${loadout.name}\uFF08${scopeKey}${exclusive ? "\uFF0C\u6392\u4ED6" : ""}\uFF09\uFF1A\u542F\u7528 ${applied}\uFF0C\u8DF3\u8FC7 ${skipped.length}\uFF0C\u505C\u7528\u7EC4\u5916 ${disabledOthers}`);
+  return { id, scope: scopeKey, exclusive, applied, skipped, disabledOthers };
+}
+async function currentLoadout(scope) {
+  const current = await readManagerState();
+  const key = typeof scope === "string" && scope ? scope : "user";
+  return current.state.activeLoadout?.[key] || null;
+}
+async function listLoadouts(options = {}) {
+  const current = await readManagerState();
+  const scopeKey = await loadoutScopeKey(options);
+  return {
+    scope: scopeKey,
+    loadouts: current.state.loadouts || [],
+    active: current.state.activeLoadout?.[scopeKey] || null
+  };
 }
 async function safeExistingEntryPaths(root, name) {
   const paths = [];
@@ -3692,13 +3988,18 @@ export {
   CUSTOM_SOURCE_PREFIX,
   KEBAB_RE,
   addCustomSources,
+  addToLoadout,
+  applyLoadout,
   assignSkillCategory,
   browseDirectories,
   checkedRepositoryRootDefinition,
   createCategory,
+  createLoadout,
   createSkill,
   createWorkspaceIndex,
+  currentLoadout,
   deleteCategory,
+  deleteLoadout,
   deleteSkill,
   entryPath,
   getOnlineUpdate,
@@ -3708,6 +4009,7 @@ export {
   importUploadedSkill,
   indexRegisteredWorkspaces,
   isCustomSourceKey,
+  listLoadouts,
   listProviderCandidates,
   listTrash,
   listWorkspaces,
@@ -3723,7 +4025,9 @@ export {
   readManagerState,
   reloadRootPathOverrides,
   removeCustomSource,
+  removeFromLoadout,
   renameCategory,
+  renameLoadout,
   renameWithRetry,
   repositoryDestinations,
   resolveAgentsHome,
@@ -3735,6 +4039,8 @@ export {
   scanCustomSourceCandidates,
   scanEntries,
   setCategoryEnabled,
+  setLoadoutEnabled,
+  setLoadoutNote,
   setOnlineUpdate,
   setRootPath,
   setSidebarEntry,

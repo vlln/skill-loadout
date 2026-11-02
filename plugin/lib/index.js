@@ -10,6 +10,15 @@ import {
   moveSkillInCategory,
   setCategoryEnabled,
   setSkillNote,
+  createLoadout,
+  renameLoadout,
+  deleteLoadout,
+  setLoadoutNote,
+  addToLoadout,
+  removeFromLoadout,
+  setLoadoutEnabled,
+  applyLoadout,
+  listLoadouts,
   importSkill,
   importUploadedSkill,
   browseDirectories,
@@ -603,6 +612,55 @@ function apply(ctx, config) {
       path: `${API_PREFIX}/skill-note`,
       methods: ["POST"],
       fetch: (req) => handlePost(req, (b, scope) => setSkillNote(String(b.root || ""), String(b.name || ""), String(b.note || ""), log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite })
+    },
+    {
+      path: `${API_PREFIX}/loadouts`,
+      methods: ["GET", "HEAD"],
+      fetch: (req) => {
+        const u = new URL(req.url);
+        const options = u.searchParams.get("scope") === "user" ? {} : projectOptions(req.headers.get("x-dsh-skills-session"));
+        return runFetch(() => listLoadouts(options), void 0, req.method === "HEAD");
+      }
+    },
+    {
+      path: `${API_PREFIX}/loadout-create`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b, scope) => createLoadout(String(b.name || ""), b.note === void 0 ? void 0 : String(b.note), Array.isArray(b.members) ? b.members : void 0, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))))
+    },
+    {
+      path: `${API_PREFIX}/loadout-rename`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b) => renameLoadout(String(b.id || ""), String(b.name || ""), log))
+    },
+    {
+      path: `${API_PREFIX}/loadout-note`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b) => setLoadoutNote(String(b.id || ""), String(b.note || ""), log))
+    },
+    {
+      path: `${API_PREFIX}/loadout-delete`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b) => deleteLoadout(String(b.id || ""), log))
+    },
+    {
+      path: `${API_PREFIX}/loadout-add`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b, scope) => addToLoadout(String(b.id || ""), String(b.root || ""), String(b.name || ""), log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))))
+    },
+    {
+      path: `${API_PREFIX}/loadout-remove`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b) => removeFromLoadout(String(b.id || ""), String(b.root || ""), String(b.name || ""), log))
+    },
+    {
+      path: `${API_PREFIX}/loadout-toggle`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b, scope) => setLoadoutEnabled(String(b.id || ""), b.enabled === true, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite })
+    },
+    {
+      path: `${API_PREFIX}/loadout-apply`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b, scope) => applyLoadout(String(b.id || ""), { exclusive: b.exclusive === true }, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite })
     },
     {
       path: `${API_PREFIX}/delete`,

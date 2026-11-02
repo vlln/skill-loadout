@@ -1,4 +1,4 @@
-import type { SkillRoot, RepositoryDestination, RootInput, Diagnostic, OperationError, CodedError, Log, DiscoveredEntry, SkillEntry, ParsedSkill, Scan, ManagerState, SkillCategory, PolicyResult, Policy, SkillItem, ViewItem, RootView, SkillView, ScopeOptions, MutationOptions, RenameOptions, UploadInput, CreateInput, ImportCandidate, ImportPending, ImportConflict, ImportFailure, ImportResult } from "./types.js";
+import type { SkillRoot, RepositoryDestination, RootInput, Diagnostic, OperationError, CodedError, Log, DiscoveredEntry, SkillEntry, ParsedSkill, Scan, ManagerState, SkillCategory, Loadout, LoadoutMember, PolicyResult, Policy, SkillItem, ViewItem, RootView, SkillView, ScopeOptions, MutationOptions, RenameOptions, UploadInput, CreateInput, ImportCandidate, ImportPending, ImportConflict, ImportFailure, ImportResult } from "./types.js";
 // dsh-skills-manager core —— 纯 Node 技能文件管理核心（仅 ZIP 解压使用 fflate，可独立单测）
 //
 // 覆盖 DSH 用户级与活动 Session 项目级技能根：
@@ -2077,7 +2077,7 @@ function defaultManagerState(): ManagerState {
     disabledSkills[root.key] = [];
     enabledSkills[root.key] = [];
   }
-  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: Object.create(null), categoryMembers: Object.create(null), categoryOrder: Object.create(null), customNotes: Object.create(null) };
+  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: Object.create(null), categoryMembers: Object.create(null), categoryOrder: Object.create(null), customNotes: Object.create(null), loadouts: [], activeLoadout: Object.create(null) };
 }
 
 function validStateSkillName(name: unknown): name is string {
@@ -2102,6 +2102,47 @@ function validPolicyLists(value: unknown, allowMissing = false) {
       continue;
     if (!Array.isArray(list) || list.some((name) => !validStateSkillName(name)))
       return false;
+  }
+  return true;
+}
+
+const LOADOUT_NAME_MAX = 24;
+const LOADOUT_NOTE_MAX = 140;
+const LOADOUT_ID_RE = /^[a-z0-9]{8,32}$/;
+/** 作用域键："user" 或 "project:<identity,...>"（identity 是 projectIdentity 的 16 位 hex）。 */
+const LOADOUT_SCOPE_RE = /^project:[a-f0-9]{16}(,[a-f0-9]{16})*$/;
+
+function validLoadoutScopeKey(scope: unknown) {
+  return scope === "user" || (typeof scope === "string" && LOADOUT_SCOPE_RE.test(scope));
+}
+
+/**
+ * loadout 段整段校验：任何一项形状非法都判整段无效，由 readManagerState 丢弃该段并记 warning，
+ * 不让坏 loadout 拖死整个 state。成员引用允许悬空（技能可能后来被删），只校验形状不校验存在性。
+ */
+function validLoadouts(value: unknown) {
+  if (value === undefined) return true;
+  if (!Array.isArray(value)) return false;
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    const loadout = item as Loadout;
+    if (typeof loadout.id !== "string" || !LOADOUT_ID_RE.test(loadout.id)) return false;
+    if (typeof loadout.name !== "string" || !loadout.name.trim() || loadout.name.length > LOADOUT_NAME_MAX) return false;
+    if (loadout.note !== undefined && loadout.note !== null && (typeof loadout.note !== "string" || loadout.note.length > LOADOUT_NOTE_MAX)) return false;
+    if (!Array.isArray(loadout.members)) return false;
+    for (const member of loadout.members) {
+      if (!member || typeof member !== "object" || Array.isArray(member)) return false;
+      if (typeof member.root !== "string" || !member.root || !validStateSkillName(member.name)) return false;
+    }
+  }
+  return true;
+}
+
+function validActiveLoadout(value: unknown) {
+  if (value === undefined) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  for (const [scope, id] of Object.entries(value)) {
+    if (!validLoadoutScopeKey(scope) || typeof id !== "string" || !LOADOUT_ID_RE.test(id)) return false;
   }
   return true;
 }
@@ -2249,6 +2290,8 @@ function normalizeManagerState(value: ManagerState) {
   normalized.categoryMembers = normalizeCategoryMembers(value.categoryMembers, normalized.categories);
   normalized.categoryOrder = normalizeCategoryOrder(value.categoryOrder, normalized.categories);
   normalized.customNotes = normalizeCustomNotes(value.customNotes);
+  normalized.loadouts = normalizeLoadouts(value.loadouts);
+  normalized.activeLoadout = normalizeActiveLoadout(value.activeLoadout, normalized.loadouts);
   return normalized;
 }
 
@@ -2326,6 +2369,46 @@ function normalizeCategoryOrder(value: ManagerState["categoryOrder"] | undefined
   return order;
 }
 
+/** 逐项宽容清洗：坏项丢弃、id 去重、成员去重；整段非法由 validLoadouts 在读取侧判丢弃。 */
+function normalizeLoadouts(value: ManagerState["loadouts"] | undefined): Loadout[] {
+  const loadouts: Loadout[] = [];
+  if (!Array.isArray(value)) return loadouts;
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const id = typeof item.id === "string" ? item.id : "";
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    if (!LOADOUT_ID_RE.test(id) || !name || name.length > LOADOUT_NAME_MAX || seen.has(id)) continue;
+    seen.add(id);
+    const note = typeof item.note === "string" ? item.note.trim() : "";
+    const members: LoadoutMember[] = [];
+    const seenMembers = new Set<string>();
+    if (Array.isArray(item.members)) {
+      for (const member of item.members) {
+        if (!member || typeof member !== "object" || Array.isArray(member)) continue;
+        const root = typeof member.root === "string" ? member.root : "";
+        const memberName = typeof member.name === "string" ? member.name : "";
+        const key = `${root}\n${memberName}`;
+        if (!root || !validStateSkillName(memberName) || seenMembers.has(key)) continue;
+        seenMembers.add(key);
+        members.push({ root, name: memberName });
+      }
+    }
+    loadouts.push({ id, name, note: note && note.length <= LOADOUT_NOTE_MAX ? note : null, members });
+  }
+  return loadouts;
+}
+
+function normalizeActiveLoadout(value: ManagerState["activeLoadout"] | undefined, loadouts: Loadout[]) {
+  const active: NonNullable<ManagerState["activeLoadout"]> = Object.create(null);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return active;
+  const known = new Set(loadouts.map((item) => item.id));
+  for (const [scope, id] of Object.entries(value)) {
+    if (validLoadoutScopeKey(scope) && typeof id === "string" && known.has(id)) active[scope] = id;
+  }
+  return active;
+}
+
 export async function readManagerState(): Promise<PolicyResult> {
   try {
     const raw = await fs.readFile(managerStatePath(), "utf8");
@@ -2333,9 +2416,18 @@ export async function readManagerState(): Promise<PolicyResult> {
     const parsed = migrateManagerStateDocument(JSON.parse(raw) as ManagerState);
     if (!validManagerStateDocument(parsed))
       throw codedError("invalid manager state schema", "error.state.invalid");
+    // loadout 段独立于整体 schema：坏数据只丢弃该段并记 warning，不把整个状态打入只读。
+    const loadoutWarning: Diagnostic | null =
+      validLoadouts(parsed.loadouts) && validActiveLoadout(parsed.activeLoadout)
+        ? null
+        : {
+            code: "warning.loadout.invalid",
+            params: { path: managerStatePath() },
+            error: `loadout 编组数据无效，已丢弃该段: ${managerStatePath()}`,
+          };
     return {
       state: normalizeManagerState(parsed),
-      warning: null,
+      warning: loadoutWarning,
       writable: true,
     };
   } catch (caught) { const error = caught as CodedError;
@@ -2819,6 +2911,250 @@ export async function setCategoryEnabled(key: string, categoryId: string, enable
     for (const name of changedNames)
       log(enabled ? "policy-enable" : "policy-disable", `${enabled ? "启用" : "停用"} ${ready.rootKey}/${name}（本地策略，源文件不变）`);
   return { root: ready.rootKey, categoryId: categoryId || null, enabled: enabled === true, changed: changedNames.length, skipped };
+}
+
+// ── loadout：跨来源的命名技能编组（整组启停 / 应用，不移动文件）───────────────
+
+function loadoutError(code: string, error: string, params?: Record<string, unknown>): OperationError {
+  return { ok: false, code, error, ...(params ? { params } : {}) };
+}
+
+async function writableLoadoutState() {
+  const current = await readManagerState();
+  if (current.writable === false) return invalidManagerStateWrite();
+  const state = current.state;
+  const loadouts = Array.isArray(state.loadouts) ? state.loadouts : (state.loadouts = []);
+  const activeLoadout =
+    state.activeLoadout && typeof state.activeLoadout === "object" && !Array.isArray(state.activeLoadout)
+      ? state.activeLoadout
+      : (state.activeLoadout = Object.create(null));
+  return { state, loadouts, activeLoadout };
+}
+
+function findLoadout(loadouts: Loadout[], id: string) {
+  return loadouts.find((item) => item.id === id);
+}
+
+/** loadout 的作用域键：无项目上下文记 "user"；有活动项目时按项目身份（可多项目，排序去重）记 "project:<id,...>"。 */
+async function loadoutScopeKey(options: ScopeOptions = {}) {
+  const cwds = (Array.isArray(options.projectCwds) ? options.projectCwds : []).filter((cwd) => typeof cwd === "string" && isAbsolute(cwd));
+  if (!cwds.length) return "user";
+  const roots = await projectRoots(cwds);
+  const ids = [...new Set(roots.map((root) => root.key.split(":").pop() || ""))].filter(Boolean).sort();
+  return ids.length ? `project:${ids.join(",")}` : "user";
+}
+
+/** 校验并规范化一条成员引用；返回规范后的 {root, name} 或错误。 */
+async function checkedLoadoutMember(root: unknown, name: unknown, options: ScopeOptions = {}) {
+  const rootKey = typeof root === "string" ? root : "";
+  const definition = rootKey ? await resolvedCategoryRoot(rootKey, options) : null;
+  if (!definition) return loadoutError("error.loadout.root", `技能来源不存在: ${rootKey}`, { root: rootKey });
+  const skillName = typeof name === "string" ? name : "";
+  if (!validStateSkillName(skillName))
+    return loadoutError("error.skill.notFound", `技能不存在: ${skillName}`, { name: skillName });
+  const entry = await resolveEntry(definition, skillName);
+  if (!entry)
+    return loadoutError("error.skill.notFound", `技能不存在: ${skillName}`, { name: skillName });
+  return { root: definition.key, name: skillName };
+}
+
+export async function createLoadout(name: string, note?: string | null, members?: LoadoutMember[], log?: Log, options: ScopeOptions = {}) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const label = String(name || "").trim();
+  if (!label || label.length > LOADOUT_NAME_MAX)
+    return loadoutError("error.loadout.name", "编组名称不能为空，且不能超过 24 个字符");
+  if (ready.loadouts.some((item) => item.name === label))
+    return loadoutError("error.loadout.duplicate", `已有同名编组: ${label}`, { name: label });
+  const text = note === undefined || note === null ? "" : String(note).trim();
+  if (text.length > LOADOUT_NOTE_MAX)
+    return loadoutError("error.loadout.noteTooLong", `编组备注过长（最多 ${LOADOUT_NOTE_MAX} 个字符）`, { max: LOADOUT_NOTE_MAX });
+  const initial: LoadoutMember[] = [];
+  for (const member of Array.isArray(members) ? members : []) {
+    const checked = await checkedLoadoutMember(member && member.root, member && member.name, options);
+    if ("ok" in checked) return checked;
+    if (!initial.some((item) => item.root === checked.root && item.name === checked.name))
+      initial.push(checked);
+  }
+  const loadout: Loadout = { id: randomBytes(8).toString("hex"), name: label, note: text || null, members: initial };
+  ready.loadouts.push(loadout);
+  await writeManagerState(ready.state);
+  if (log) log("loadout-create", `创建编组 ${label}（${initial.length} 个成员）`);
+  return { loadout };
+}
+
+export async function renameLoadout(id: string, name: string, log?: Log) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "编组不存在", { id });
+  const label = String(name || "").trim();
+  if (!label || label.length > LOADOUT_NAME_MAX)
+    return loadoutError("error.loadout.name", "编组名称不能为空，且不能超过 24 个字符");
+  if (ready.loadouts.some((item) => item !== loadout && item.name === label))
+    return loadoutError("error.loadout.duplicate", `已有同名编组: ${label}`, { name: label });
+  loadout.name = label;
+  await writeManagerState(ready.state);
+  if (log) log("loadout-rename", `重命名编组 ${id} 为 ${label}`);
+  return { loadout };
+}
+
+export async function deleteLoadout(id: string, log?: Log) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "编组不存在", { id });
+  ready.state.loadouts = ready.loadouts.filter((item) => item.id !== id);
+  for (const [scope, active] of Object.entries(ready.activeLoadout)) {
+    if (active === id) delete ready.activeLoadout[scope];
+  }
+  await writeManagerState(ready.state);
+  if (log) log("loadout-delete", `删除编组 ${loadout.name}（${id}），技能本身不受影响`);
+  return { id };
+}
+
+export async function setLoadoutNote(id: string, note: string, log?: Log) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "编组不存在", { id });
+  const text = String(note || "").trim();
+  if (text.length > LOADOUT_NOTE_MAX)
+    return loadoutError("error.loadout.noteTooLong", `编组备注过长（最多 ${LOADOUT_NOTE_MAX} 个字符）`, { max: LOADOUT_NOTE_MAX });
+  loadout.note = text || null;
+  await writeManagerState(ready.state);
+  if (log) log("loadout-note", `编组 ${loadout.name} 更新备注: ${text ? `"${text}"` : "已清空"}`);
+  return { id, note: loadout.note };
+}
+
+export async function addToLoadout(id: string, root: string, name: string, log?: Log, options: ScopeOptions = {}) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "编组不存在", { id });
+  const checked = await checkedLoadoutMember(root, name, options);
+  if ("ok" in checked) return checked;
+  if (loadout.members.some((item) => item.root === checked.root && item.name === checked.name))
+    return { id, root: checked.root, name: checked.name, added: false };
+  loadout.members.push(checked);
+  await writeManagerState(ready.state);
+  if (log) log("loadout-add", `编组 ${loadout.name} 加入 ${checked.root}/${checked.name}`);
+  return { id, root: checked.root, name: checked.name, added: true };
+}
+
+export async function removeFromLoadout(id: string, root: string, name: string, log?: Log) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "编组不存在", { id });
+  const rootKey = String(root || "");
+  const skillName = String(name || "");
+  const before = loadout.members.length;
+  loadout.members = loadout.members.filter((item) => !(item.root === rootKey && item.name === skillName));
+  const removed = loadout.members.length !== before;
+  if (removed) {
+    await writeManagerState(ready.state);
+    if (log) log("loadout-remove", `编组 ${loadout.name} 移出 ${rootKey}/${skillName}`);
+  }
+  return { id, root: rootKey, name: skillName, removed };
+}
+
+export async function setLoadoutEnabled(id: string, enabled: boolean, log?: Log, options: ScopeOptions = {}) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "编组不存在", { id });
+  const skipped: string[] = [];
+  const changedNames: string[] = [];
+  for (const member of loadout.members) {
+    const root = await resolvedCategoryRoot(member.root, options);
+    if (!root) {
+      skipped.push(`${member.root}/${member.name}`);
+      continue;
+    }
+    const result = await applyPolicySkillEnabled(root, member.name, enabled, ready.state);
+    if (result && result.ok === false) {
+      // 悬空或不可加载的成员跳过并计入 skipped，不拖垮整组启停。
+      skipped.push(`${member.root}/${member.name}`);
+      continue;
+    }
+    changedNames.push(`${member.root}/${member.name}`);
+  }
+  if (changedNames.length) await writeManagerState(ready.state);
+  if (log)
+    for (const name of changedNames)
+      log(enabled ? "policy-enable" : "policy-disable", `${enabled ? "启用" : "停用"} ${name}（本地策略，源文件不变）`);
+  return { id, enabled: enabled === true, changed: changedNames.length, skipped };
+}
+
+export async function applyLoadout(id: string, applyOptions: { exclusive?: boolean } = {}, log?: Log, options: ScopeOptions = {}) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const loadout = findLoadout(ready.loadouts, id);
+  if (!loadout) return loadoutError("error.loadout.notFound", "编组不存在", { id });
+  const exclusive = applyOptions.exclusive === true;
+  const scopeKey = await loadoutScopeKey(options);
+  const memberKeys = new Set(loadout.members.map((member) => `${member.root}/${member.name}`));
+  const skipped: string[] = [];
+  const changedNames: string[] = [];
+  let disabledOthers = 0;
+  if (exclusive) {
+    // 先快照"当前被启用的组外技能"，再逐个停用；不可加载的条目本来就不可调用，跳过。
+    const candidateRoots = [...userRoots(), ...(await projectRoots(options.projectCwds))].filter((root) => root.toggleable !== false);
+    const disabling: { root: SkillRoot; name: string }[] = [];
+    for (const root of candidateRoots) {
+      const { entries } = await scanEntries(root);
+      for (const entry of entries) {
+        if (memberKeys.has(`${root.key}/${entry.name}`)) continue;
+        if (entry.loadable === false) continue;
+        const policy = effectiveSkillPolicy({ state: ready.state, writable: true, warning: null }, root, entry);
+        if (policy.enabled) disabling.push({ root, name: entry.name });
+      }
+    }
+    for (const item of disabling) {
+      const result = await applyPolicySkillEnabled(item.root, item.name, false, ready.state);
+      if (result && result.ok === false) continue;
+      disabledOthers += 1;
+      changedNames.push(`${item.root.key}/${item.name}`);
+    }
+  }
+  let applied = 0;
+  for (const member of loadout.members) {
+    const root = await resolvedCategoryRoot(member.root, options);
+    if (!root) {
+      skipped.push(`${member.root}/${member.name}`);
+      continue;
+    }
+    const result = await applyPolicySkillEnabled(root, member.name, true, ready.state);
+    if (result && result.ok === false) {
+      skipped.push(`${member.root}/${member.name}`);
+      continue;
+    }
+    applied += 1;
+    changedNames.push(`${member.root}/${member.name}`);
+  }
+  ready.activeLoadout[scopeKey] = id;
+  await writeManagerState(ready.state);
+  if (log)
+    log("loadout-apply", `应用编组 ${loadout.name}（${scopeKey}${exclusive ? "，排他" : ""}）：启用 ${applied}，跳过 ${skipped.length}，停用组外 ${disabledOthers}`);
+  return { id, scope: scopeKey, exclusive, applied, skipped, disabledOthers };
+}
+
+/** 读某作用域当前应用的 loadout id；无记录返回 null。 */
+export async function currentLoadout(scope: string) {
+  const current = await readManagerState();
+  const key = typeof scope === "string" && scope ? scope : "user";
+  return current.state.activeLoadout?.[key] || null;
+}
+
+export async function listLoadouts(options: ScopeOptions = {}) {
+  const current = await readManagerState();
+  const scopeKey = await loadoutScopeKey(options);
+  return {
+    scope: scopeKey,
+    loadouts: current.state.loadouts || [],
+    active: current.state.activeLoadout?.[scopeKey] || null,
+  };
 }
 
 async function safeExistingEntryPaths(root: string, name: string) {

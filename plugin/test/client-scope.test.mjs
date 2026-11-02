@@ -156,7 +156,7 @@ try {
   assert.deepEqual(rows(), ["global-two"]);
   let toggleRequest;
   render();
-  assert.equal(find((node) => node.props.className === "dssm-scope-tabs").props.items.length, 4, "仓库、回收站与两个技能视图同级");
+  assert.equal(find((node) => node.props.className === "dssm-scope-tabs").props.items.length, 5, "编组、仓库、回收站与两个技能视图同级");
   data.trash.push(
     { id: "trash-a", name: "removed-a", deletedAt: "2026-09-12T00:00:00Z", root: { scope: "project", projectName: "A" } },
     { id: "trash-b", name: "removed-b", deletedAt: "2026-09-12T00:00:00Z", root: { scope: "user" } },

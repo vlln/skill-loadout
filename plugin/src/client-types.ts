@@ -2,7 +2,7 @@ import type { ClawHubPage, ClawHubSearchResponse } from './clawhub-catalog.js';
 import type * as React from 'react';
 import type { createRepositoryManager } from './repositories.js';
 import type { state, skillDetail, createSkill, listTrash, listWorkspaces, workspaceSkills, addCustomSources, updateCustomSource, removeCustomSource, scanCustomSourceCandidates } from './core.js';
-import type { ImportResult } from './types.js';
+import type { ImportResult, Loadout } from './types.js';
 export type Translate = (key: string, params?: object) => string;
 type Success<T> = T extends {
     error: string;
@@ -47,6 +47,15 @@ export type ApiRoutes = RepositoryRoutes & Record<SkillsShSearchPath, SkillsShSe
     '/category-enable': unknown;
     '/category-disable': unknown;
     '/skill-note': unknown;
+    '/loadouts': { scope: string; loadouts: Loadout[]; active: string | null };
+    '/loadout-create': { loadout: Loadout };
+    '/loadout-rename': unknown;
+    '/loadout-note': unknown;
+    '/loadout-delete': unknown;
+    '/loadout-add': unknown;
+    '/loadout-remove': unknown;
+    '/loadout-toggle': { id: string; enabled: boolean; changed: number; skipped: string[] };
+    '/loadout-apply': { id: string; scope: string; exclusive: boolean; applied: number; skipped: string[]; disabledOthers: number };
     '/sidebar-entry': { enabled: boolean };
     '/online-update': { enabled: boolean };
 };

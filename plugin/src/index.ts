@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { HostContext, ProviderControl, Agent } from "./host-types.js";
-import type { Log, Serialize, CreateInput, UploadInput, SkillRequest, RepositoryInput, ScopeOptions, SkillRoot, OperationError, RootView, Diagnostic } from "./types.js";
+import type { Log, Serialize, CreateInput, UploadInput, SkillRequest, RepositoryInput, ScopeOptions, SkillRoot, OperationError, RootView, Diagnostic, LoadoutMember } from "./types.js";
 import type { ProviderCandidate } from "./core.js";
 import type { CodedError } from "./types.js";
 // dsh-loadout host half（基于 dsh-skills-manager 改造）：设置面板的 HTTP 后端（connection.fetch 路由）
@@ -22,6 +22,15 @@ import {
   moveSkillInCategory,
   setCategoryEnabled,
   setSkillNote,
+  createLoadout,
+  renameLoadout,
+  deleteLoadout,
+  setLoadoutNote,
+  addToLoadout,
+  removeFromLoadout,
+  setLoadoutEnabled,
+  applyLoadout,
+  listLoadouts,
   importSkill,
   importUploadedSkill,
   browseDirectories,
@@ -681,6 +690,56 @@ function apply(ctx: HostContext, config?: PluginConfig) {
       fetch: (req) => handlePost(req, (b, scope) => setSkillNote(String(b.root || ""), String(b.name || ""), String(b.note || ""), log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite }),
     },
     {
+      path: `${API_PREFIX}/loadouts`,
+      methods: ["GET", "HEAD"],
+      fetch: (req) => {
+        const u = new URL(req.url);
+        // ?scope=user 强制用户作用域；否则从活动会话 cwd 推导（与技能列表同一套 ScopeOptions）。
+        const options = u.searchParams.get("scope") === "user" ? {} : projectOptions(req.headers.get("x-dsh-skills-session"));
+        return runFetch(() => listLoadouts(options), undefined, req.method === "HEAD");
+      },
+    },
+    {
+      path: `${API_PREFIX}/loadout-create`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b, scope) => createLoadout(String(b.name || ""), b.note === undefined ? undefined : String(b.note), Array.isArray(b.members) ? b.members as LoadoutMember[] : undefined, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session")))),
+    },
+    {
+      path: `${API_PREFIX}/loadout-rename`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b) => renameLoadout(String(b.id || ""), String(b.name || ""), log)),
+    },
+    {
+      path: `${API_PREFIX}/loadout-note`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b) => setLoadoutNote(String(b.id || ""), String(b.note || ""), log)),
+    },
+    {
+      path: `${API_PREFIX}/loadout-delete`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b) => deleteLoadout(String(b.id || ""), log)),
+    },
+    {
+      path: `${API_PREFIX}/loadout-add`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b, scope) => addToLoadout(String(b.id || ""), String(b.root || ""), String(b.name || ""), log, scopedOptions(scope, req.headers.get("x-dsh-skills-session")))),
+    },
+    {
+      path: `${API_PREFIX}/loadout-remove`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b) => removeFromLoadout(String(b.id || ""), String(b.root || ""), String(b.name || ""), log)),
+    },
+    {
+      path: `${API_PREFIX}/loadout-toggle`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b, scope) => setLoadoutEnabled(String(b.id || ""), b.enabled === true, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite }),
+    },
+    {
+      path: `${API_PREFIX}/loadout-apply`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b, scope) => applyLoadout(String(b.id || ""), { exclusive: b.exclusive === true }, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite }),
+    },
+    {
       path: `${API_PREFIX}/delete`,
       methods: ["POST"],
       fetch: (req) => handlePost(req, async (b, scope) => {
@@ -840,4 +899,4 @@ function apply(ctx: HostContext, config?: PluginConfig) {
 export { activeSessionCwds, apply, inject, name, notifyChatCatalog, registerAgentSkillProviders };
 
 /** 请求体由各业务入口现有校验解析，此类型只声明路由转交的字段。 */
-type RequestBody = CreateInput & UploadInput & SkillRequest & RepositoryInput & {root?: string; source?: string; conflict?: string; dryRun?: boolean; workspace?: unknown; enabled?: boolean; category?: string; targetName?: string; position?: "before" | "after"; catalog?: string; skillId?: string; owner?: string; slug?: string; path?: unknown; key?: string; id?: string; label?: unknown; group?: unknown; sources?: unknown[]; note?: string};
+type RequestBody = CreateInput & UploadInput & SkillRequest & RepositoryInput & {root?: string; source?: string; conflict?: string; dryRun?: boolean; workspace?: unknown; enabled?: boolean; category?: string; targetName?: string; position?: "before" | "after"; catalog?: string; skillId?: string; owner?: string; slug?: string; path?: unknown; key?: string; id?: string; label?: unknown; group?: unknown; sources?: unknown[]; note?: string; members?: unknown; exclusive?: unknown};

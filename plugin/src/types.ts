@@ -82,6 +82,18 @@ export interface SkillCategory {
     id: string;
     name: string;
 }
+/** loadout 成员是一条跨来源的技能引用；root 是来源键（含 project-* 键），name 是技能名。 */
+export interface LoadoutMember {
+    root: string;
+    name: string;
+}
+/** loadout：命名的、跨来源的一组技能引用，面向任务整组启停/应用。 */
+export interface Loadout {
+    id: string;
+    name: string;
+    note?: string | null;
+    members: LoadoutMember[];
+}
 export interface ManagerState {
     version: number;
     sources: Record<string, boolean>;
@@ -98,6 +110,10 @@ export interface ManagerState {
     categoryOrder: Record<string, Record<string, string[]>>;
     /** 每个来源、技能的自定义简介/备注。不改写 SKILL.md，旧状态文件可缺省。 */
     customNotes?: Record<string, Record<string, string>>;
+    /** 跨来源的技能编组（loadout）。旧状态文件可缺省；坏数据整段丢弃并记 warning。 */
+    loadouts?: Loadout[];
+    /** 每个作用域当前应用的 loadout：键为 "user" 或 "project:<identity,...>"，值为 loadout id。 */
+    activeLoadout?: Record<string, string>;
 }
 export interface PolicyResult {
     state: ManagerState;
