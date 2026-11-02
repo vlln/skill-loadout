@@ -60,6 +60,8 @@ function fixture() {
         writes.push(path);
         return writeResult?.promise || Promise.resolve({ enabled: JSON.parse(options.body).enabled });
       }
+      // 新增的 GET 端点（如 v2 的 /gatekeeper）走默认应答，避免本 fixture 逐个补桩。
+      if (!gets[path]) return Promise.resolve({ enabled: true });
       return gets[path].promise;
     },
   });
