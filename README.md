@@ -6,6 +6,9 @@
 
 **用 `atlas` 定位，用 `loadout` 组装**：前者是判断与地图，后者是一个任务实际加载的那几份。项目名取后者——这个仓库产出的是"可组装的一组"，不是一个工具。
 
+
+[![Agent Skills](https://img.shields.io/badge/Agent_Skills-规范-4D6BFE?style=flat-square)](https://agentskills.io)
+
 ## 当前状态
 
 **理论已定骨架，方法跑过五轮真实对照。** [THEORY.md](THEORY.md) 是唯一权威；[docs/status.md](docs/status.md) 写清每条结论的证据有多硬、哪些预测还没测过。

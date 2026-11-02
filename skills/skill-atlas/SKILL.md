@@ -4,6 +4,7 @@ description: >
   当你要判断一份 skill 主要回答哪个问题、两份 skill 是否重叠或能否互换、一份 skill 该不该拆，
   或者要为一类任务配一组 skill（loadout）并检查组内有没有两份抢同一段权威时使用本 skill。
   也用于审计一批现有 skill 在流程 / 质量 / 执行三面上的分布。
+  判定：两份 skill 会不会对同一段指令都声称拥有权威——会，就必须拆清或合并。
   Use when placing a skill by the question it answers, checking overlap, splitting, or assembling a loadout.
 license: MIT
 metadata:
