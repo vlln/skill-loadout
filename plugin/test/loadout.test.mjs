@@ -1,6 +1,8 @@
 // loadout：跨来源的命名技能编组。只写管理器状态，不移动技能文件。
 // 覆盖：创建/改名/删除、成员增删、整组启停（含不可加载成员的 skipped）、
 // 排他应用（exclusive 停用组外技能）、成员悬空容忍、activeLoadout 记录、坏数据整段丢弃。
+// v2 守门人：默认开、成员加载/非成员不加载、手动引用覆盖、手动排除优先、
+// 无 activeLoadout 全不加载、关闭后回到 v1、scope 隔离、effectiveSkillPolicy 判定顺序。
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -26,6 +28,13 @@ const {
   state,
   projectRoots,
   managerStatePath,
+  getGatekeeper,
+  setGatekeeper,
+  setSkillReferenced,
+  setSkillEnabled,
+  effectiveSkillPolicy,
+  resolveActiveLoadout,
+  listProviderCandidates,
 } = await import("../lib/core.js");
 
 const skillText = (name) => `---\nname: ${name}\ndescription: 测试技能\n---\n正文\n`;
@@ -48,6 +57,22 @@ await writeSkill(dsh, "broken-skill", "没有 frontmatter\n");
 await writeSkill(codex, "codex-skill");
 await writeSkill(dsh, "ghost-skill");
 const alphaBefore = await readFile(alphaDoc, "utf8");
+
+// ── 守门人默认开：新状态文件缺省即守门人语义 ──────────────────────────────────
+assert.equal(await getGatekeeper(), true, "守门人默认开（装了本插件就是这个语义）");
+assert.equal((await state()).gatekeeper, true, "state 快照下发守门人开关");
+assert.equal(await dshEnabled("alpha"), false, "守门人开且无 activeLoadout：什么都不加载");
+assert.equal(
+  (await state()).roots.find((root) => root.key === "dsh").skills.find((item) => item.name === "alpha").gated,
+  true,
+  "未加载技能带 gated 标记（与手动排除区分）",
+);
+
+// 以下 v1 行为断言在守门人关闭下进行：关掉 = 与现状逐字节一致。
+await setGatekeeper(false);
+assert.equal(await getGatekeeper(), false);
+assert.equal((await state()).gatekeeper, false);
+assert.equal(await dshEnabled("alpha"), true, "守门人关闭后回到 v1 默认启用");
 
 // ── 创建（含 note 与初始成员）与字段校验 ─────────────────────────────────────
 const created = await createLoadout("研发", "代码评审与重构", [
@@ -225,6 +250,165 @@ assert.equal(await dshEnabled("alpha"), true, "其他策略字段不受影响");
 const recreated = await createLoadout("重建");
 assert.equal(recreated.ok, undefined, "丢弃坏段后可以正常重建");
 assert.equal((await listLoadouts()).loadouts.length, 1);
+
+// ── 守门人模式（v2）：成员加载 / 手动引用 / 手动排除 / scope 隔离 ──────────────
+// 先清掉 v1 段落写入的 enabledSkills（那些是"手动引用"），让成员只靠编组资格生效。
+await setSkillReferenced(dsh, "alpha", false);
+await setSkillReferenced(dsh, "beta", false);
+await setSkillReferenced(codex, "codex-skill", false);
+await setGatekeeper(true);
+assert.equal(await getGatekeeper(), true);
+assert.equal(await currentLoadout("user"), null, "坏段丢弃后 user scope 没有 activeLoadout");
+assert.equal(await dshEnabled("alpha"), false, "无 activeLoadout 时全不加载");
+assert.equal(await codexEnabled("codex-skill"), false);
+
+// 应用 = 设为当前（守门人语义）：不写 disabled 列表，disabledOthers 恒为 0，悬空成员跳过。
+await writeSkill(dsh, "vanishing");
+const gatedLoadout = await createLoadout("守门", undefined, [
+  { root: "dsh", name: "alpha" },
+  { root: "codex", name: "codex-skill" },
+  { root: "dsh", name: "vanishing" },
+]);
+await rm(join(dsh, "vanishing"), { recursive: true, force: true });
+const gatedApply = await applyLoadout(gatedLoadout.loadout.id, { exclusive: true });
+assert.equal(gatedApply.scope, "user");
+assert.equal(gatedApply.disabledOthers, 0, "守门人下排他应用不再逐个写 disabled");
+assert.equal(gatedApply.applied, 2, "可解析成员计入 applied");
+assert.deepEqual(gatedApply.skipped, ["dsh/vanishing"], "悬空成员跳过并计入 skipped");
+assert.equal(await currentLoadout("user"), gatedLoadout.loadout.id, "设为当前 scope 的 activeLoadout");
+const stateAfterGatedApply = (await readManagerState()).state;
+assert.deepEqual(stateAfterGatedApply.disabledSkills.dsh, [], "组外技能没有被写 disabled 列表");
+assert.deepEqual(stateAfterGatedApply.enabledSkills.dsh, [], "成员靠编组资格生效，不写 enabledSkills");
+assert.equal((await listLoadouts()).gatekeeper, true, "编组列表接口下发守门人开关");
+
+// 成员加载、非成员不加载
+assert.equal(await dshEnabled("alpha"), true, "成员加载");
+assert.equal(await codexEnabled("codex-skill"), true, "跨来源成员加载");
+assert.equal(await dshEnabled("beta"), false, "非成员不加载");
+assert.equal(
+  (await state()).roots.find((root) => root.key === "dsh").skills.find((item) => item.name === "beta").gated,
+  true,
+  "非成员带 gated 标记",
+);
+assert.equal(
+  (await state()).roots.find((root) => root.key === "dsh").skills.find((item) => item.name === "alpha").gated,
+  undefined,
+  "成员不带 gated 标记",
+);
+
+// 手动引用覆盖守门人基线；取消引用只清 enabledSkills，不写 disabledSkills。
+const referenced = await setSkillReferenced(dsh, "beta", true);
+assert.equal(referenced.enabled, true);
+assert.equal(await dshEnabled("beta"), true, "手动引用覆盖守门人基线");
+await setSkillReferenced(dsh, "beta", false);
+assert.equal(await dshEnabled("beta"), false, "取消引用后回到未加载");
+assert.equal((await readManagerState()).state.disabledSkills.dsh.includes("beta"), false, "取消引用不写 disabled 列表");
+assert.equal((await setSkillReferenced(dsh, "broken-skill", true)).code, "error.skill.noFrontmatter", "不可加载技能不能引用");
+
+// 手动排除优先于成员资格
+await setSkillEnabled(dsh, "alpha", false);
+assert.equal(await dshEnabled("alpha"), false, "手动排除优先于成员资格");
+await setSkillEnabled(dsh, "alpha", true);
+assert.equal(await dshEnabled("alpha"), true, "解除排除后成员资格恢复生效");
+// 清掉手动引用，让 alpha 只靠编组资格生效（成员不是 override，原生副本不需要覆盖层）。
+await setSkillReferenced(dsh, "alpha", false);
+assert.equal(await dshEnabled("alpha"), true, "取消引用后成员资格仍生效");
+
+// listProviderCandidates 走同一决策点：非成员发布阻断覆盖层，成员照常提供。
+await writeSkill(codex, "codex-other");
+const gatedCandidates = await listProviderCandidates();
+assert.equal(gatedCandidates.find((item) => item.name === "alpha"), undefined, "原生根成员无需覆盖层（宿主原生提供）");
+const otherCandidate = gatedCandidates.find((item) => item.name === "codex-other");
+assert.ok(otherCandidate, "外部非成员仍发布候选");
+assert.equal(otherCandidate.invocation.modelInvocable, false, "外部非成员被阻断");
+const betaCandidate = gatedCandidates.find((item) => item.name === "beta");
+assert.ok(betaCandidate, "原生根非成员发布阻断覆盖层");
+assert.equal(betaCandidate.invocation.userInvocable, false, "原生根非成员被阻断");
+assert.equal(gatedCandidates.find((item) => item.name === "codex-skill").invocation.modelInvocable, true, "外部成员照常提供");
+
+// 换 scope 互不影响：项目 scope 的 activeLoadout 独立解析。
+const gatedWs = join(temporary, "gated-ws");
+await mkdir(join(gatedWs, ".git"), { recursive: true });
+await writeSkill(join(gatedWs, ".dsh", "skills"), "delta");
+const gatedProjectRoot = (await projectRoots([gatedWs])).find((item) => item.kind === "project-dsh");
+const projectScopeKey = (await listLoadouts({ projectCwds: [gatedWs] })).scope;
+assert.ok(projectScopeKey.startsWith("project:"), "项目作用域键带 project: 前缀");
+const projectView = await state({ projectCwds: [gatedWs] });
+assert.equal(projectView.roots.find((root) => root.key === gatedProjectRoot.key).skills.find((item) => item.name === "delta").enabled, false, "项目 scope 无 activeLoadout：项目技能不加载");
+assert.equal(projectView.roots.find((root) => root.key === "dsh").skills.find((item) => item.name === "alpha").enabled, false, "user 编组的成员资格不带进项目 scope");
+const gatedProjectLoadout = await createLoadout("项目守门", undefined, [{ root: gatedProjectRoot.key, name: "delta" }], undefined, { projectCwds: [gatedWs] });
+const appliedProjectGated = await applyLoadout(gatedProjectLoadout.loadout.id, {}, undefined, { projectCwds: [gatedWs] });
+assert.equal(appliedProjectGated.applied, 1);
+assert.equal(appliedProjectGated.disabledOthers, 0);
+const projectView2 = await state({ projectCwds: [gatedWs] });
+assert.equal(projectView2.roots.find((root) => root.key === gatedProjectRoot.key).skills.find((item) => item.name === "delta").enabled, true, "项目 activeLoadout 的成员加载");
+assert.equal(projectView2.roots.find((root) => root.key === "dsh").skills.find((item) => item.name === "alpha").enabled, false, "项目 activeLoadout 只含自己的成员");
+assert.equal(await dshEnabled("alpha"), true, "user scope 保持自己的 activeLoadout");
+assert.equal(await currentLoadout("user"), gatedLoadout.loadout.id, "项目应用不改 user scope");
+
+// 守门人关闭后完全回到 v1 行为。
+await setGatekeeper(false);
+assert.equal((await state()).gatekeeper, false, "快照下发关闭状态");
+assert.equal(await dshEnabled("beta"), true, "关闭后非成员恢复默认启用");
+assert.equal(
+  (await state()).roots.find((root) => root.key === "dsh").skills.find((item) => item.name === "beta").gated,
+  undefined,
+  "关闭后不再带 gated 标记",
+);
+assert.equal((await listProviderCandidates()).find((item) => item.name === "beta"), undefined, "关闭后原生副本不再需要阻断覆盖层");
+assert.equal((await listProviderCandidates()).find((item) => item.name === "codex-other").invocation.modelInvocable, true, "关闭后外部技能恢复提供");
+assert.equal((await state({ projectCwds: [gatedWs] })).roots.find((root) => root.key === gatedProjectRoot.key).skills.find((item) => item.name === "delta").enabled, true, "关闭后项目技能恢复默认启用");
+
+// ── effectiveSkillPolicy 判定顺序（假数据驱动，逐条对应契约 v2）────────────────
+const fakeEntry = (name, extra = {}) => ({
+  name, declaredName: name, description: "", modelInvocable: true, userInvocable: true,
+  invocationPolicyValid: true, hasFrontmatter: true, loadable: true, diagnostics: [],
+  kind: "bundle", docPath: "", entryPath: "", realDocPath: "", realEntryPath: "", linked: false,
+  ...extra,
+});
+const fakeRoot = { key: "dsh" };
+const fakeState = (over = {}) => ({
+  version: 1,
+  sources: { dsh: true, codex: true },
+  disabledSkills: { dsh: [], codex: [] },
+  enabledSkills: { dsh: [], codex: [] },
+  gatekeeper: true,
+  loadouts: [{ id: "loadout1", name: "L", note: null, members: [{ root: "dsh", name: "member" }] }],
+  activeLoadout: { user: "loadout1" },
+  ...over,
+});
+const fakePolicy = (policyState, writable = true) => ({ state: policyState, writable, warning: null });
+
+// 1. 手动排除 → 禁用（即使是成员）。
+assert.equal(effectiveSkillPolicy(fakePolicy(fakeState({ disabledSkills: { dsh: ["member"], codex: [] } })), fakeRoot, fakeEntry("member")).enabled, false);
+// 2. 手动引用 → 启用（即使不是成员）。
+assert.equal(effectiveSkillPolicy(fakePolicy(fakeState({ enabledSkills: { dsh: ["other"], codex: [] } })), fakeRoot, fakeEntry("other")).enabled, true);
+// 3a. 守门人开：成员启用。
+const memberPolicy = effectiveSkillPolicy(fakePolicy(fakeState()), fakeRoot, fakeEntry("member"));
+assert.equal(memberPolicy.enabled, true);
+assert.equal(memberPolicy.gated, undefined, "成员不带 gated 标记");
+// 3b. 守门人开：非成员禁用且带 gated 标记。
+const gatedPolicy = effectiveSkillPolicy(fakePolicy(fakeState()), fakeRoot, fakeEntry("other"));
+assert.equal(gatedPolicy.enabled, false);
+assert.equal(gatedPolicy.gated, true);
+// 3c. 无 activeLoadout：全不加载，手动引用仍生效。
+assert.equal(effectiveSkillPolicy(fakePolicy(fakeState({ activeLoadout: {} })), fakeRoot, fakeEntry("member")).enabled, false);
+assert.equal(effectiveSkillPolicy(fakePolicy(fakeState({ activeLoadout: {}, enabledSkills: { dsh: ["member"], codex: [] } })), fakeRoot, fakeEntry("member")).enabled, true);
+// 3d. 成员资格认别名：成员引用可以指向被去重隐藏的副本（policyAliases）。
+const aliasPolicy = effectiveSkillPolicy(fakePolicy(fakeState()), { key: "codex" }, fakeEntry("renamed", { policyAliases: [{ rootKey: "dsh", name: "member" }] }));
+assert.equal(aliasPolicy.enabled, true, "成员引用命中 policyAliases 中的副本");
+// 3e. 换 scope 互不影响：别的 scope 的 activeLoadout 不参与判定。
+assert.equal(effectiveSkillPolicy(fakePolicy(fakeState()), fakeRoot, fakeEntry("member"), "project:0123456789abcdef").enabled, false, "别的 scope 没有 activeLoadout");
+// 4. 守门人关 → 现状（默认启用）。
+assert.equal(effectiveSkillPolicy(fakePolicy(fakeState({ gatekeeper: false })), fakeRoot, fakeEntry("other")).enabled, true);
+// 硬条件照旧优先：不可写状态与来源停用先于一切。
+assert.equal(effectiveSkillPolicy(fakePolicy(fakeState({ enabledSkills: { dsh: ["other"], codex: [] } }), false), fakeRoot, fakeEntry("other")).enabled, false, "不可写状态优先于手动引用");
+assert.equal(effectiveSkillPolicy(fakePolicy(fakeState({ sources: { dsh: false, codex: true } })), fakeRoot, fakeEntry("member")).enabled, false, "来源停用优先于成员资格");
+
+// resolveActiveLoadout：悬空 id 与未知 scope 解析为 null。
+assert.equal(resolveActiveLoadout(fakeState(), "user").id, "loadout1");
+assert.equal(resolveActiveLoadout(fakeState(), "project:0123456789abcdef"), null);
+assert.equal(resolveActiveLoadout(fakeState({ activeLoadout: { user: "missing00" } }), "user"), null, "悬空 id 解析为 null");
 
 await rm(temporary, { recursive: true, force: true });
 console.log("loadout ok");

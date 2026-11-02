@@ -53,6 +53,9 @@ import {
   setSidebarEntry,
   getOnlineUpdate,
   setOnlineUpdate,
+  getGatekeeper,
+  setGatekeeper,
+  setSkillReferenced,
 } from "./core.js";
 import { createRepositoryManager } from "./repositories.js";
 import { installationSourceKey } from "./repository-updates.js";
@@ -481,6 +484,23 @@ function apply(ctx: HostContext, config?: PluginConfig) {
       },
     },
     {
+      // 守门人开关直接改变生效技能集，写后要失效 provider 与斜杠菜单缓存。
+      path: `${API_PREFIX}/gatekeeper`,
+      methods: ["GET", "HEAD", "POST"],
+      fetch: (req) => {
+        if (req.method === "GET" || req.method === "HEAD") {
+          return runFetch(async () => ({ enabled: await getGatekeeper() }), undefined, req.method === "HEAD");
+        }
+        return handlePost(req, async (b) => {
+          if (!b || typeof b.enabled !== "boolean") {
+            throw Object.assign(new Error("enabled 必须是布尔值"), { statusCode: 400, code: "error.proto.invalidParams" });
+          }
+          const enabled = await setGatekeeper(b.enabled);
+          return { enabled };
+        }, { afterSuccess: afterWrite });
+      },
+    },
+    {
       path: `${API_PREFIX}/workspaces`,
       methods: ["GET", "HEAD"],
       fetch: (req) => runFetch(async () => ({ items: await listWorkspaces(registeredWorkspacePaths(ctx) ?? []) }), undefined, req.method === "HEAD"),
@@ -613,6 +633,12 @@ function apply(ctx: HostContext, config?: PluginConfig) {
       path: `${API_PREFIX}/disable`,
       methods: ["POST"],
       fetch: (req) => handlePost(req, async (b, scope) => setSkillEnabled(await requestRoot(String(b.root || "dsh"), scope?.projectCwds, req.headers.get("x-dsh-skills-session")), String(b.name || ""), false, log), { afterSuccess: afterWrite }),
+    },
+    {
+      // 守门人语义的单技能开关：引用 / 取消引用（写或清 enabledSkills override，不写 disabled）。
+      path: `${API_PREFIX}/skill-reference`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, async (b, scope) => setSkillReferenced(await requestRoot(String(b.root || "dsh"), scope?.projectCwds, req.headers.get("x-dsh-skills-session")), String(b.name || ""), b.referenced === true, log), { afterSuccess: afterWrite }),
     },
     {
       path: `${API_PREFIX}/source-enable`,
@@ -899,4 +925,4 @@ function apply(ctx: HostContext, config?: PluginConfig) {
 export { activeSessionCwds, apply, inject, name, notifyChatCatalog, registerAgentSkillProviders };
 
 /** 请求体由各业务入口现有校验解析，此类型只声明路由转交的字段。 */
-type RequestBody = CreateInput & UploadInput & SkillRequest & RepositoryInput & {root?: string; source?: string; conflict?: string; dryRun?: boolean; workspace?: unknown; enabled?: boolean; category?: string; targetName?: string; position?: "before" | "after"; catalog?: string; skillId?: string; owner?: string; slug?: string; path?: unknown; key?: string; id?: string; label?: unknown; group?: unknown; sources?: unknown[]; note?: string; members?: unknown; exclusive?: unknown};
+type RequestBody = CreateInput & UploadInput & SkillRequest & RepositoryInput & {root?: string; source?: string; conflict?: string; dryRun?: boolean; workspace?: unknown; enabled?: boolean; referenced?: boolean; category?: string; targetName?: string; position?: "before" | "after"; catalog?: string; skillId?: string; owner?: string; slug?: string; path?: unknown; key?: string; id?: string; label?: unknown; group?: unknown; sources?: unknown[]; note?: string; members?: unknown; exclusive?: unknown};

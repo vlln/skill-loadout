@@ -114,6 +114,8 @@ export interface ManagerState {
     loadouts?: Loadout[];
     /** 每个作用域当前应用的 loadout：键为 "user" 或 "project:<identity,...>"，值为 loadout id。 */
     activeLoadout?: Record<string, string>;
+    /** 守门人模式：开启后只有当前编组成员与被手动引用的技能加载。默认 true。 */
+    gatekeeper?: boolean;
 }
 export interface PolicyResult {
     state: ManagerState;
@@ -126,6 +128,8 @@ export interface Policy {
     modelInvocable: boolean;
     userInvocable: boolean;
     enabled: boolean;
+    /** 守门人拦截：开启且既非当前编组成员也未被手动引用时为 true（与手动排除区分开）。 */
+    gated?: boolean;
 }
 export interface SkillView extends Omit<SkillEntry, 'docPath' | 'entryPath' | 'realDocPath' | 'realEntryPath' | 'linked'> {
     path: string;
@@ -151,6 +155,8 @@ export interface SkillView extends Omit<SkillEntry, 'docPath' | 'entryPath' | 'r
     customNote?: string | null;
     /** 可写根里的顶层目录链接。详情和启停可用，删除与覆盖不可用。 */
     linked?: boolean;
+    /** 守门人开启且该技能既非当前编组成员也未被手动引用：UI 显示"未加载"而非"停用"。 */
+    gated?: boolean;
 }
 export interface RootView extends SkillRoot {
     exists: boolean;

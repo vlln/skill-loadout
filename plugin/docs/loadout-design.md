@@ -65,3 +65,51 @@ scope 的取法照现有 ScopeOptions（user / project cwds）。
 1. `pnpm build` 通过；新增测试全绿；fork 既有测试的通过集合不退化（基线矩阵见 /tmp/r5matrix.txt 的对比方法——你的改动不允许把 pristine 能过的测试弄挂）。
 2. 不动既有功能的任何行为；所有新代码都在新函数/新路由/新 UI 页签里。
 3. 不注册任何与 npm 自更新相关的东西（这个 fork 不上架 npm）。
+
+---
+
+# v2：守门人模式（gatekeeper）——默认不加载
+
+2026-11-02，用户定的语义，实现者照此执行。
+
+## 核心语义
+
+技能目录（发现根里的文件）只是**物理存放**，不代表逻辑加载。装了本插件，session 不再按标准发现逻辑加载全部技能——只有两类生效：
+
+1. 当前 scope 的 activeLoadout 的成员（按编组配置加载）；
+2. 被显式启用的单个技能（手动引用 = 现有的 enabledSkills override）。
+
+## 机制（只动一个决策点）
+
+所有改动集中在 `effectiveSkillPolicy`（core.ts）与其调用方，外加状态与 UI：
+
+- `ManagerState` 增加 `gatekeeper?: boolean`（默认 true——装了本插件就是这个语义；设置里可关，关了就完全回到 v1 行为）。
+- 解析当前 scope 的 activeLoadout：`resolveActiveLoadout(state, scopeKey)`；scopeKey 取法沿用 v1（user / project:<identity>）。
+- `effectiveSkillPolicy` 的判定顺序改为：
+  1. `override === false`（手动排除）→ 禁用；
+  2. `override === true`（手动引用）→ 启用；
+  3. gatekeeper 开 → 成员才启用，其余禁用；
+  4. gatekeeper 关 → 现状（默认启用）。
+  不可写状态、来源停用、不可加载（loadable=false）这些原有的硬条件照旧优先。
+- `listProviderCandidates` 走 `effectiveSkillPolicy`，所以守门人自动对宿主生效——宿主侧与 agent 侧的覆盖发布逻辑一行不用改。
+
+## 行为变化点
+
+- gatekeeper 开且无 activeLoadout：**什么都不加载**（这是语义本身，不是 bug）。UI 在编组页签顶部给引导条："守门人已开启，当前没有启用的编组——新建或选一个。"
+- gatekeeper 开时的 `applyLoadout(id, {exclusive})`：语义简化为"把它设为当前 scope 的 activeLoadout"。组外技能因为不是成员自动失效，**不需要**逐个写 disabled 列表；已有的 disabled override 保留（那是手动排除）。非排他应用 = 设为当前 + 不碰别的。
+- gatekeeper 开时技能行的单开关语义变为"手动引用 / 取消引用"（写/清 enabledSkills override），UI 文案照此调整。
+- 编组卡片加"当前"标记（它就是该 scope 的 activeLoadout 时）；应用按钮即"设为当前"。
+
+## UI
+
+- 设置里加开关：「守门人模式」默认开；说明文案一句："开启后，只有当前编组的成员与被手动引用的技能会加载。"
+- 编组页签：当前编组标记、引导条、设为当前。
+- 技能列表（既有页签）：守门人开时，非成员技能显示为"未加载"而不是"停用"，开关含义是"引用"。
+
+## 测试
+
+扩充 `test/loadout.test.mjs`：gatekeeper 默认开、成员加载/非成员不加载、手动引用覆盖基线、手动排除优先于成员资格、无 activeLoadout 时全不加载、gatekeeper 关闭后完全回到 v1 行为、换 scope 互不影响。全绿；既有可过测试集合不退化。
+
+## 完成定义
+
+同 v1，外加：假数据驱动 `effectiveSkillPolicy` 的断言逐条对应上面的判定顺序。

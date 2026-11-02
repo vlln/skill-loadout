@@ -47,7 +47,7 @@ export type ApiRoutes = RepositoryRoutes & Record<SkillsShSearchPath, SkillsShSe
     '/category-enable': unknown;
     '/category-disable': unknown;
     '/skill-note': unknown;
-    '/loadouts': { scope: string; loadouts: Loadout[]; active: string | null };
+    '/loadouts': { scope: string; loadouts: Loadout[]; active: string | null; gatekeeper?: boolean };
     '/loadout-create': { loadout: Loadout };
     '/loadout-rename': unknown;
     '/loadout-note': unknown;
@@ -56,8 +56,10 @@ export type ApiRoutes = RepositoryRoutes & Record<SkillsShSearchPath, SkillsShSe
     '/loadout-remove': unknown;
     '/loadout-toggle': { id: string; enabled: boolean; changed: number; skipped: string[] };
     '/loadout-apply': { id: string; scope: string; exclusive: boolean; applied: number; skipped: string[]; disabledOthers: number };
+    '/skill-reference': unknown;
     '/sidebar-entry': { enabled: boolean };
     '/online-update': { enabled: boolean };
+    '/gatekeeper': { enabled: boolean };
 };
 export type ApiCall = <K extends keyof ApiRoutes>(path: K, options?: RequestInit) => Promise<ApiRoutes[K]>;
 export interface ModalProps {

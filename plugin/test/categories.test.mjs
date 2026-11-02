@@ -9,7 +9,9 @@ process.env.DSH_HOME = join(temporary, "dsh");
 process.env.DSH_AGENTS_HOME = join(temporary, "agents");
 process.env.DSH_CODEX_HOME = join(temporary, "codex");
 process.env.HOME = process.env.USERPROFILE = join(temporary, "user");
-const { createCategory, renameCategory, deleteCategory, assignSkillCategory, moveSkillInCategory, setCategoryEnabled, readManagerState, state, projectRoots, deleteSkill, restoreTrash, permanentlyDeleteTrash } = await import("../lib/core.js");
+const { createCategory, renameCategory, deleteCategory, assignSkillCategory, moveSkillInCategory, setCategoryEnabled, readManagerState, state, projectRoots, deleteSkill, restoreTrash, permanentlyDeleteTrash, setGatekeeper } = await import("../lib/core.js");
+// 本测试断言 v1 的分类启停语义（关掉守门人 = 与现状逐字节一致），显式关闭（装了插件默认开）。
+await setGatekeeper(false);
 
 const skillText = (name) => `---\nname: ${name}\ndescription: 测试技能\n---\n正文\n`;
 const writeSkill = async (root, name, text = skillText(name)) => {

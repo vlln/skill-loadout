@@ -780,8 +780,8 @@ eq(
     { skill: { enabled: true, loadable: true, shadowedBy: { root: "dsh" } } },
     { skill: { enabled: false, loadable: false } },
   ])),
-  JSON.stringify({ total: 5, enabled: 2, disabled: 1, shadowed: 1, invalid: 1 }),
-  "summary counts match status-filter buckets",
+  JSON.stringify({ total: 5, enabled: 2, disabled: 1, unloaded: 0, shadowed: 1, invalid: 1 }),
+  "summary counts match status-filter buckets（含守门人的 unloaded 桶）",
 );
 ok(
   DICT.zh["dest.scope.workspace"] && DICT.en["dest.scope.workspace"] && DICT.zh["workspace.noSkills"] && DICT.en["workspace.noSkills"] && DICT.en["trash.source"],

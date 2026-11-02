@@ -40,7 +40,10 @@ import {
   getSidebarEntry,
   setSidebarEntry,
   getOnlineUpdate,
-  setOnlineUpdate
+  setOnlineUpdate,
+  getGatekeeper,
+  setGatekeeper,
+  setSkillReferenced
 } from "./core.js";
 import { createRepositoryManager } from "./repositories.js";
 import { installationSourceKey } from "./repository-updates.js";
@@ -405,6 +408,23 @@ function apply(ctx, config) {
       }
     },
     {
+      // 守门人开关直接改变生效技能集，写后要失效 provider 与斜杠菜单缓存。
+      path: `${API_PREFIX}/gatekeeper`,
+      methods: ["GET", "HEAD", "POST"],
+      fetch: (req) => {
+        if (req.method === "GET" || req.method === "HEAD") {
+          return runFetch(async () => ({ enabled: await getGatekeeper() }), void 0, req.method === "HEAD");
+        }
+        return handlePost(req, async (b) => {
+          if (!b || typeof b.enabled !== "boolean") {
+            throw Object.assign(new Error("enabled \u5FC5\u987B\u662F\u5E03\u5C14\u503C"), { statusCode: 400, code: "error.proto.invalidParams" });
+          }
+          const enabled = await setGatekeeper(b.enabled);
+          return { enabled };
+        }, { afterSuccess: afterWrite });
+      }
+    },
+    {
       path: `${API_PREFIX}/workspaces`,
       methods: ["GET", "HEAD"],
       fetch: (req) => runFetch(async () => ({ items: await listWorkspaces(registeredWorkspacePaths(ctx) ?? []) }), void 0, req.method === "HEAD")
@@ -537,6 +557,12 @@ function apply(ctx, config) {
       path: `${API_PREFIX}/disable`,
       methods: ["POST"],
       fetch: (req) => handlePost(req, async (b, scope) => setSkillEnabled(await requestRoot(String(b.root || "dsh"), scope?.projectCwds, req.headers.get("x-dsh-skills-session")), String(b.name || ""), false, log), { afterSuccess: afterWrite })
+    },
+    {
+      // 守门人语义的单技能开关：引用 / 取消引用（写或清 enabledSkills override，不写 disabled）。
+      path: `${API_PREFIX}/skill-reference`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, async (b, scope) => setSkillReferenced(await requestRoot(String(b.root || "dsh"), scope?.projectCwds, req.headers.get("x-dsh-skills-session")), String(b.name || ""), b.referenced === true, log), { afterSuccess: afterWrite })
     },
     {
       path: `${API_PREFIX}/source-enable`,

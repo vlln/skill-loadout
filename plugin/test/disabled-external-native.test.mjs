@@ -18,6 +18,8 @@ process.env.DSH_AGENTS_HOME = join(qa, "user", ".agents");
 const skill = "bundled-regression";
 const bundled = join(qa, "bundled");
 const core = await import("../lib/core.js");
+// 本回归断言 v1 的来源/单技能停用与原生遮蔽语义，显式关闭守门人（装了插件默认开）。
+await core.setGatekeeper(false);
 async function fixtureNamed(root, name, body) {
   const dir = join(root, name);
   await mkdir(dir, { recursive: true });

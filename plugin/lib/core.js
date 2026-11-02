@@ -1675,7 +1675,7 @@ function defaultManagerState() {
     disabledSkills[root.key] = [];
     enabledSkills[root.key] = [];
   }
-  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: /* @__PURE__ */ Object.create(null), categoryMembers: /* @__PURE__ */ Object.create(null), categoryOrder: /* @__PURE__ */ Object.create(null), customNotes: /* @__PURE__ */ Object.create(null), loadouts: [], activeLoadout: /* @__PURE__ */ Object.create(null) };
+  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: /* @__PURE__ */ Object.create(null), categoryMembers: /* @__PURE__ */ Object.create(null), categoryOrder: /* @__PURE__ */ Object.create(null), customNotes: /* @__PURE__ */ Object.create(null), loadouts: [], activeLoadout: /* @__PURE__ */ Object.create(null), gatekeeper: true };
 }
 function validStateSkillName(name) {
   return validDiscoveryName(name);
@@ -1737,6 +1737,7 @@ function validManagerStateDocument(value) {
     return false;
   if (value.sidebarEntry !== void 0 && typeof value.sidebarEntry !== "boolean") return false;
   if (value.onlineUpdate !== void 0 && typeof value.onlineUpdate !== "boolean") return false;
+  if (value.gatekeeper !== void 0 && typeof value.gatekeeper !== "boolean") return false;
   for (const root of userRoots()) {
     if (root.key === "dsh") {
       if (value.sources.dsh !== void 0 && typeof value.sources.dsh !== "boolean") return false;
@@ -1800,6 +1801,9 @@ function normalizeManagerState(value) {
   }
   if (typeof value.onlineUpdate === "boolean") {
     normalized.onlineUpdate = value.onlineUpdate;
+  }
+  if (typeof value.gatekeeper === "boolean") {
+    normalized.gatekeeper = value.gatekeeper;
   }
   for (const root of userRoots()) {
     if (value.sources && typeof value.sources[root.key] === "boolean")
@@ -1999,7 +2003,22 @@ function managerSkillOverride(policy, rootKey, name, policyAliases = []) {
   if (inheritedEnable) return true;
   return void 0;
 }
-function effectiveSkillPolicy(policyResult, root, entry) {
+function resolveActiveLoadout(state2, scopeKey) {
+  const key = typeof scopeKey === "string" && scopeKey ? scopeKey : "user";
+  const id = state2.activeLoadout && typeof state2.activeLoadout === "object" && !Array.isArray(state2.activeLoadout) ? state2.activeLoadout[key] : void 0;
+  if (!id) return null;
+  const loadouts = Array.isArray(state2.loadouts) ? state2.loadouts : [];
+  return loadouts.find((item) => item.id === id) || null;
+}
+function gatekeeperMember(active, root, entry) {
+  if (!active) return false;
+  for (const member of active.members) {
+    if (member.root === root.key && member.name === entry.name) return true;
+    if ((entry.policyAliases || []).some((alias) => alias.rootKey === member.root && alias.name === member.name)) return true;
+  }
+  return false;
+}
+function effectiveSkillPolicy(policyResult, root, entry, scopeKey = "user") {
   const override = managerSkillOverride(
     policyResult.state,
     root.key,
@@ -2015,6 +2034,19 @@ function effectiveSkillPolicy(policyResult, root, entry) {
       userInvocable: false,
       enabled: false
     };
+  }
+  if (policyResult.state.gatekeeper !== false && override !== true) {
+    const active = resolveActiveLoadout(policyResult.state, scopeKey);
+    if (!gatekeeperMember(active, root, entry)) {
+      return {
+        override,
+        sourceEnabled,
+        modelInvocable: false,
+        userInvocable: false,
+        enabled: false,
+        gated: true
+      };
+    }
   }
   const modelInvocable = entry.invocationPolicyValid ? entry.modelInvocable : true;
   const userInvocable = entry.invocationPolicyValid ? entry.userInvocable : true;
@@ -2063,6 +2095,22 @@ async function setOnlineUpdate(enabled) {
     throw codedError("manager state file is read-only", "error.state.invalid");
   }
   current.state.onlineUpdate = enabled;
+  await writeManagerState(current.state);
+  return enabled;
+}
+async function getGatekeeper() {
+  const current = await readManagerState();
+  return current.state.gatekeeper !== false;
+}
+async function setGatekeeper(enabled) {
+  if (typeof enabled !== "boolean") {
+    throw codedError("gatekeeper must be a boolean", "error.proto.invalidParams");
+  }
+  const current = await readManagerState();
+  if (current.writable === false) {
+    throw codedError("manager state file is read-only", "error.state.invalid");
+  }
+  current.state.gatekeeper = enabled;
   await writeManagerState(current.state);
   return enabled;
 }
@@ -2202,6 +2250,31 @@ async function setPolicySkillEnabled(root, name, enabled, log) {
 }
 async function setSkillEnabled(root, name, enabled, log) {
   return setPolicySkillEnabled(root, name, enabled, log);
+}
+async function setSkillReferenced(root, name, referenced, log) {
+  const definition = await checkedPolicyRootDefinition(root);
+  if (definition && definition.ok === false) return definition;
+  if (!definition) return readonlyError("toggle");
+  const current = await readManagerState();
+  if (current.writable === false) return invalidManagerStateWrite();
+  if (referenced) {
+    const result = await applyPolicySkillEnabled(definition, name, true, current.state);
+    if (result && result.ok === false) return result;
+    await writeManagerState(current.state);
+    if (log)
+      log("policy-enable", `\u5F15\u7528 ${definition.key}/${name}\uFF08\u672C\u5730\u7B56\u7565\uFF0C\u6E90\u6587\u4EF6\u4E0D\u53D8\uFF09`);
+    return result;
+  }
+  const listed = new Set(current.state.enabledSkills[definition.key] || []);
+  if (!listed.has(name)) {
+    return { root: definition.key, name, enabled: false };
+  }
+  listed.delete(name);
+  current.state.enabledSkills[definition.key] = [...listed].sort();
+  await writeManagerState(current.state);
+  if (log)
+    log("policy-disable", `\u53D6\u6D88\u5F15\u7528 ${definition.key}/${name}\uFF08\u672C\u5730\u7B56\u7565\uFF0C\u6E90\u6587\u4EF6\u4E0D\u53D8\uFF09`);
+  return { root: definition.key, name, enabled: false };
 }
 function categoryError(code, error, params) {
   return { ok: false, code, error, ...params ? { params } : {} };
@@ -2554,6 +2627,24 @@ async function applyLoadout(id, applyOptions = {}, log, options = {}) {
   if (!loadout) return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id });
   const exclusive = applyOptions.exclusive === true;
   const scopeKey = await loadoutScopeKey(options);
+  if (ready.state.gatekeeper !== false) {
+    const gatedSkipped = [];
+    let gatedApplied = 0;
+    for (const member of loadout.members) {
+      const root = await resolvedCategoryRoot(member.root, options);
+      const entry = root ? await resolveEntry(root, member.name) : null;
+      if (!entry) {
+        gatedSkipped.push(`${member.root}/${member.name}`);
+        continue;
+      }
+      gatedApplied += 1;
+    }
+    ready.activeLoadout[scopeKey] = id;
+    await writeManagerState(ready.state);
+    if (log)
+      log("loadout-apply", `\u5E94\u7528\u7F16\u7EC4 ${loadout.name}\uFF08${scopeKey}\uFF0C\u5B88\u95E8\u4EBA\uFF09\uFF1A\u8BBE\u4E3A\u5F53\u524D\uFF0C\u6210\u5458 ${gatedApplied} \u4E2A\uFF0C\u8DF3\u8FC7 ${gatedSkipped.length} \u4E2A`);
+    return { id, scope: scopeKey, exclusive, applied: gatedApplied, skipped: gatedSkipped, disabledOthers: 0 };
+  }
   const memberKeys = new Set(loadout.members.map((member) => `${member.root}/${member.name}`));
   const skipped = [];
   const changedNames = [];
@@ -2566,7 +2657,7 @@ async function applyLoadout(id, applyOptions = {}, log, options = {}) {
       for (const entry of entries) {
         if (memberKeys.has(`${root.key}/${entry.name}`)) continue;
         if (entry.loadable === false) continue;
-        const policy = effectiveSkillPolicy({ state: ready.state, writable: true, warning: null }, root, entry);
+        const policy = effectiveSkillPolicy({ state: ready.state, writable: true, warning: null }, root, entry, scopeKey);
         if (policy.enabled) disabling.push({ root, name: entry.name });
       }
     }
@@ -2609,7 +2700,8 @@ async function listLoadouts(options = {}) {
   return {
     scope: scopeKey,
     loadouts: current.state.loadouts || [],
-    active: current.state.activeLoadout?.[scopeKey] || null
+    active: current.state.activeLoadout?.[scopeKey] || null,
+    gatekeeper: current.state.gatekeeper !== false
   };
 }
 async function safeExistingEntryPaths(root, name) {
@@ -3651,15 +3743,16 @@ async function listProviderCandidates(options = {}) {
   const candidates = [];
   const user = userRoots();
   const userScans = await scanDeduplicatedRoots(user);
-  const items = user.flatMap(
-    (root) => userScans.get(root.key).entries.map((entry) => ({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry) }))
-  );
   const cwd = options && typeof options.cwd === "string" ? options.cwd : void 0;
+  const scopeKey = await loadoutScopeKey({ projectCwds: cwd ? [cwd] : [] });
+  const items = user.flatMap(
+    (root) => userScans.get(root.key).entries.map((entry) => ({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey) }))
+  );
   if (cwd) {
     const roots = await projectRoots([cwd]);
     for (const root of roots) {
       const scanned = (await scanDeduplicatedRoots([root])).get(root.key);
-      for (const entry of scanned.entries) items.push({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry) });
+      for (const entry of scanned.entries) items.push({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey) });
     }
   }
   for (const group of groupLoadableSkillsByName(items).values()) {
@@ -3670,7 +3763,7 @@ async function listProviderCandidates(options = {}) {
     const project = root.scope === "project";
     const policyOnly = root.mutable && root.key !== "agents";
     const overlayRank = group.length > 1 ? Math.min(...group.map((item) => Math.min(item.root.rank, item.entry.providerRank ?? item.root.rank))) - 1 : void 0;
-    const needsOverlay = !policyOnly || group.length > 1 || policy.override !== void 0 || !entry.invocationPolicyValid || policyResult.writable === false || !policy.sourceEnabled;
+    const needsOverlay = !policyOnly || group.length > 1 || policy.override !== void 0 || !entry.invocationPolicyValid || policyResult.writable === false || !policy.sourceEnabled || policy.gated === true;
     if (!needsOverlay) continue;
     const candidateName = canonicalSkillName({ root, entry, policy });
     if (!KEBAB_RE.test(candidateName)) continue;
@@ -3769,7 +3862,7 @@ function groupLoadableSkillsByName(items) {
   return groups;
 }
 function isCopyDisabled(item) {
-  return !item.policy.sourceEnabled || item.policy.override === false;
+  return !item.policy.sourceEnabled || item.policy.override === false || item.policy.gated === true;
 }
 function selectSkillWinner(group) {
   return group.find((item) => !isCopyDisabled(item)) || group[0];
@@ -3859,6 +3952,7 @@ async function state(options = {}) {
   const scoped = await projectRoots(options.projectCwds, projectWarnings);
   const policyResult = await readManagerState();
   const trash = await listTrash();
+  const scopeKey = await loadoutScopeKey(options);
   const result = {
     roots: [],
     // 创建、导入、仓库安装共用的用户级写入位置，由后端校验过可写性。
@@ -3866,6 +3960,8 @@ async function state(options = {}) {
     projects: [],
     summary: { total: 0, enabled: 0, disabled: 0, issues: 0 },
     trash,
+    // 守门人开关下发给 UI：非成员技能显示"未加载"，开关含义变为"引用"。
+    gatekeeper: policyResult.state.gatekeeper !== false,
     warnings: [
       ...policyResult.warning ? [policyResult.warning] : [],
       ...projectWarnings,
@@ -3891,7 +3987,7 @@ async function state(options = {}) {
       });
     const skills = [];
     for (const e of entries) {
-      const policy = effectiveSkillPolicy(policyResult, root, e);
+      const policy = effectiveSkillPolicy(policyResult, root, e, scopeKey);
       const managerEnabled = policyResult.writable !== false && policy.sourceEnabled && policy.override !== false;
       skills.push({
         name: e.name,
@@ -3912,7 +4008,8 @@ async function state(options = {}) {
         path: e.docPath,
         categoryId: policyResult.state.categoryMembers[root.key]?.[e.name] || null,
         customNote: policyResult.state.customNotes?.[root.key]?.[e.name] || null,
-        linked: e.linked === true
+        linked: e.linked === true,
+        ...policy.gated === true ? { gated: true } : {}
       });
       all.push({
         root,
@@ -4001,7 +4098,9 @@ export {
   deleteCategory,
   deleteLoadout,
   deleteSkill,
+  effectiveSkillPolicy,
   entryPath,
+  getGatekeeper,
   getOnlineUpdate,
   getProviderSkill,
   getSidebarEntry,
@@ -4030,6 +4129,7 @@ export {
   renameLoadout,
   renameWithRetry,
   repositoryDestinations,
+  resolveActiveLoadout,
   resolveAgentsHome,
   resolveDshHome,
   resolveEntry,
@@ -4039,6 +4139,7 @@ export {
   scanCustomSourceCandidates,
   scanEntries,
   setCategoryEnabled,
+  setGatekeeper,
   setLoadoutEnabled,
   setLoadoutNote,
   setOnlineUpdate,
@@ -4046,6 +4147,7 @@ export {
   setSidebarEntry,
   setSkillEnabled,
   setSkillNote,
+  setSkillReferenced,
   setSourceEnabled,
   skillDetail,
   state,

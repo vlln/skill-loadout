@@ -2077,7 +2077,7 @@ function defaultManagerState(): ManagerState {
     disabledSkills[root.key] = [];
     enabledSkills[root.key] = [];
   }
-  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: Object.create(null), categoryMembers: Object.create(null), categoryOrder: Object.create(null), customNotes: Object.create(null), loadouts: [], activeLoadout: Object.create(null) };
+  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: Object.create(null), categoryMembers: Object.create(null), categoryOrder: Object.create(null), customNotes: Object.create(null), loadouts: [], activeLoadout: Object.create(null), gatekeeper: true };
 }
 
 function validStateSkillName(name: unknown): name is string {
@@ -2168,6 +2168,7 @@ function validManagerStateDocument(value: ManagerState) {
     return false;
   if (value.sidebarEntry !== undefined && typeof value.sidebarEntry !== "boolean") return false;
   if (value.onlineUpdate !== undefined && typeof value.onlineUpdate !== "boolean") return false;
+  if (value.gatekeeper !== undefined && typeof value.gatekeeper !== "boolean") return false;
   for (const root of userRoots()) {
     if (root.key === "dsh") {
       if (value.sources.dsh !== undefined && typeof value.sources.dsh !== "boolean") return false;
@@ -2251,6 +2252,9 @@ function normalizeManagerState(value: ManagerState) {
   }
   if (typeof value.onlineUpdate === "boolean") {
     normalized.onlineUpdate = value.onlineUpdate;
+  }
+  if (typeof value.gatekeeper === "boolean") {
+    normalized.gatekeeper = value.gatekeeper;
   }
   for (const root of userRoots()) {
     if (
@@ -2468,7 +2472,35 @@ function managerSkillOverride(policy: ManagerState, rootKey: string, name: strin
   return undefined;
 }
 
-function effectiveSkillPolicy(policyResult: PolicyResult, root: SkillRoot, entry: SkillEntry): Policy {
+/** 解析某作用域当前应用的 loadout；scopeKey 取法沿用 loadoutScopeKey（"user" 或 "project:<identity,...>"）。 */
+export function resolveActiveLoadout(state: ManagerState, scopeKey: string): Loadout | null {
+  const key = typeof scopeKey === "string" && scopeKey ? scopeKey : "user";
+  const id = state.activeLoadout && typeof state.activeLoadout === "object" && !Array.isArray(state.activeLoadout)
+    ? state.activeLoadout[key]
+    : undefined;
+  if (!id) return null;
+  const loadouts = Array.isArray(state.loadouts) ? state.loadouts : [];
+  return loadouts.find((item) => item.id === id) || null;
+}
+
+/** 成员资格按"去重后任一副本"判定：成员引用可以指向被去重隐藏的副本（policyAliases）。 */
+function gatekeeperMember(active: Loadout | null, root: SkillRoot, entry: SkillEntry) {
+  if (!active) return false;
+  for (const member of active.members) {
+    if (member.root === root.key && member.name === entry.name) return true;
+    if ((entry.policyAliases || []).some((alias) => alias.rootKey === member.root && alias.name === member.name)) return true;
+  }
+  return false;
+}
+
+/**
+ * 单技能生效判定。判定顺序（不可写状态、来源停用等硬条件照旧优先）：
+ * 1. 手动排除（override === false）→ 禁用；
+ * 2. 手动引用（override === true）→ 启用；
+ * 3. 守门人开 → 仅当前 scope 的 activeLoadout 成员启用，其余禁用（gated，无 activeLoadout 时全不加载）；
+ * 4. 守门人关 → 现状（默认启用）。
+ */
+export function effectiveSkillPolicy(policyResult: PolicyResult, root: SkillRoot, entry: SkillEntry, scopeKey: string = "user"): Policy {
   const override = managerSkillOverride(
     policyResult.state,
     root.key,
@@ -2486,6 +2518,19 @@ function effectiveSkillPolicy(policyResult: PolicyResult, root: SkillRoot, entry
       userInvocable: false,
       enabled: false,
     };
+  }
+  if (policyResult.state.gatekeeper !== false && override !== true) {
+    const active = resolveActiveLoadout(policyResult.state, scopeKey);
+    if (!gatekeeperMember(active, root, entry)) {
+      return {
+        override,
+        sourceEnabled,
+        modelInvocable: false,
+        userInvocable: false,
+        enabled: false,
+        gated: true,
+      };
+    }
   }
   const modelInvocable = entry.invocationPolicyValid ? entry.modelInvocable : true;
   const userInvocable = entry.invocationPolicyValid ? entry.userInvocable : true;
@@ -2539,6 +2584,24 @@ export async function setOnlineUpdate(enabled: boolean): Promise<boolean> {
     throw codedError("manager state file is read-only", "error.state.invalid");
   }
   current.state.onlineUpdate = enabled;
+  await writeManagerState(current.state);
+  return enabled;
+}
+
+export async function getGatekeeper(): Promise<boolean> {
+  const current = await readManagerState();
+  return current.state.gatekeeper !== false;
+}
+
+export async function setGatekeeper(enabled: boolean): Promise<boolean> {
+  if (typeof enabled !== "boolean") {
+    throw codedError("gatekeeper must be a boolean", "error.proto.invalidParams");
+  }
+  const current = await readManagerState();
+  if (current.writable === false) {
+    throw codedError("manager state file is read-only", "error.state.invalid");
+  }
+  current.state.gatekeeper = enabled;
   await writeManagerState(current.state);
   return enabled;
 }
@@ -2699,6 +2762,36 @@ async function setPolicySkillEnabled(root: RootInput, name: string, enabled: boo
 /** enabled=true 恢复模型与 / 手动调用；false 同时停用两种调用入口。 */
 export async function setSkillEnabled(root: RootInput, name: string, enabled: boolean, log?: Log) {
   return setPolicySkillEnabled(root, name, enabled, log);
+}
+
+/**
+ * 守门人语义下的单技能开关：引用 = 写 enabledSkills override（同启用）；
+ * 取消引用 = 只清 enabledSkills，不写 disabledSkills（手动排除是另一个动作）。
+ */
+export async function setSkillReferenced(root: RootInput, name: string, referenced: boolean, log?: Log) {
+  const definition = await checkedPolicyRootDefinition(root);
+  if (definition && definition.ok === false) return definition;
+  if (!definition) return readonlyError("toggle");
+  const current = await readManagerState();
+  if (current.writable === false) return invalidManagerStateWrite();
+  if (referenced) {
+    const result = await applyPolicySkillEnabled(definition, name, true, current.state);
+    if (result && result.ok === false) return result;
+    await writeManagerState(current.state);
+    if (log)
+      log("policy-enable", `引用 ${definition.key}/${name}（本地策略，源文件不变）`);
+    return result;
+  }
+  const listed = new Set(current.state.enabledSkills[definition.key] || []);
+  if (!listed.has(name)) {
+    return { root: definition.key, name, enabled: false };
+  }
+  listed.delete(name);
+  current.state.enabledSkills[definition.key] = [...listed].sort();
+  await writeManagerState(current.state);
+  if (log)
+    log("policy-disable", `取消引用 ${definition.key}/${name}（本地策略，源文件不变）`);
+  return { root: definition.key, name, enabled: false };
 }
 
 function categoryError(code: string, error: string, params?: Record<string, unknown>): OperationError {
@@ -3094,6 +3187,26 @@ export async function applyLoadout(id: string, applyOptions: { exclusive?: boole
   if (!loadout) return loadoutError("error.loadout.notFound", "编组不存在", { id });
   const exclusive = applyOptions.exclusive === true;
   const scopeKey = await loadoutScopeKey(options);
+  if (ready.state.gatekeeper !== false) {
+    // 守门人语义：应用 = 设为当前 scope 的 activeLoadout。组外技能因不是成员自动失效，
+    // 不需要逐个写 disabled 列表；已有的 disabled override 属于手动排除，保留。
+    const gatedSkipped: string[] = [];
+    let gatedApplied = 0;
+    for (const member of loadout.members) {
+      const root = await resolvedCategoryRoot(member.root, options);
+      const entry = root ? await resolveEntry(root, member.name) : null;
+      if (!entry) {
+        gatedSkipped.push(`${member.root}/${member.name}`);
+        continue;
+      }
+      gatedApplied += 1;
+    }
+    ready.activeLoadout[scopeKey] = id;
+    await writeManagerState(ready.state);
+    if (log)
+      log("loadout-apply", `应用编组 ${loadout.name}（${scopeKey}，守门人）：设为当前，成员 ${gatedApplied} 个，跳过 ${gatedSkipped.length} 个`);
+    return { id, scope: scopeKey, exclusive, applied: gatedApplied, skipped: gatedSkipped, disabledOthers: 0 };
+  }
   const memberKeys = new Set(loadout.members.map((member) => `${member.root}/${member.name}`));
   const skipped: string[] = [];
   const changedNames: string[] = [];
@@ -3107,7 +3220,7 @@ export async function applyLoadout(id: string, applyOptions: { exclusive?: boole
       for (const entry of entries) {
         if (memberKeys.has(`${root.key}/${entry.name}`)) continue;
         if (entry.loadable === false) continue;
-        const policy = effectiveSkillPolicy({ state: ready.state, writable: true, warning: null }, root, entry);
+        const policy = effectiveSkillPolicy({ state: ready.state, writable: true, warning: null }, root, entry, scopeKey);
         if (policy.enabled) disabling.push({ root, name: entry.name });
       }
     }
@@ -3154,6 +3267,7 @@ export async function listLoadouts(options: ScopeOptions = {}) {
     scope: scopeKey,
     loadouts: current.state.loadouts || [],
     active: current.state.activeLoadout?.[scopeKey] || null,
+    gatekeeper: current.state.gatekeeper !== false,
   };
 }
 
@@ -4332,22 +4446,24 @@ export async function skillDetail(key: string, name: string, options: ScopeOptio
   };
 }
 
-/** 选择未停用的最高优先级副本；全部停用时保留原生覆盖或显式禁用阻断。 */
+/** 选择未停用（含未被守门人拦截）的最高优先级副本；全部停用时保留原生覆盖或显式禁用阻断。 */
 export async function listProviderCandidates(options: ScopeOptions = {}) {
   const policyResult = await readManagerState();
   const candidates = [];
   const user = userRoots();
   const userScans = await scanDeduplicatedRoots(user);
-  const items = user.flatMap((root) =>
-    userScans.get(root.key)!.entries.map((entry) => ({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry) })),
-  );
   const cwd =
     options && typeof options.cwd === "string" ? options.cwd : undefined;
+  // 守门人按会话作用域判定：有项目 cwd 时用项目作用域键，否则用户作用域（与 loadoutScopeKey 一致）。
+  const scopeKey = await loadoutScopeKey({ projectCwds: cwd ? [cwd] : [] });
+  const items = user.flatMap((root) =>
+    userScans.get(root.key)!.entries.map((entry) => ({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey) })),
+  );
   if (cwd) {
     const roots = await projectRoots([cwd]);
     for (const root of roots) {
       const scanned = (await scanDeduplicatedRoots([root])).get(root.key)!;
-      for (const entry of scanned.entries) items.push({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry) });
+      for (const entry of scanned.entries) items.push({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey) });
     }
   }
   for (const group of groupLoadableSkillsByName(items).values()) {
@@ -4365,13 +4481,15 @@ export async function listProviderCandidates(options: ScopeOptions = {}) {
       ? Math.min(...group.map((item) => Math.min(item.root.rank, item.entry.providerRank ?? item.root.rank))) - 1
       : undefined;
     // 原生根由宿主自己的 provider 提供；来源停用必须发布覆盖层，否则停用不生效。
+    // 守门人拦截（gated）同理：非成员技能也要发布阻断覆盖层，否则宿主原生发现会照常加载。
     const needsOverlay =
       !policyOnly ||
       group.length > 1 ||
       policy.override !== undefined ||
       !entry.invocationPolicyValid ||
       policyResult.writable === false ||
-      !policy.sourceEnabled;
+      !policy.sourceEnabled ||
+      policy.gated === true;
     if (!needsOverlay) continue;
     const candidateName = canonicalSkillName({ root, entry, policy });
     if (!KEBAB_RE.test(candidateName)) continue;
@@ -4500,9 +4618,10 @@ function groupLoadableSkillsByName<T extends SkillItem>(items: T[]): Map<string,
   return groups;
 }
 
-// 只跳过 manager 明确停用的副本；frontmatter 的分通道限制和非法策略仍按原规则失败关闭。
+// 只跳过 manager 明确停用的副本；守门人拦截（gated）同样让位给可加载的同名副本；
+// frontmatter 的分通道限制和非法策略仍按原规则失败关闭。
 function isCopyDisabled(item: SkillItem) {
-  return !item.policy.sourceEnabled || item.policy.override === false;
+  return !item.policy.sourceEnabled || item.policy.override === false || item.policy.gated === true;
 }
 function selectSkillWinner<T extends SkillItem>(group: T[]): T {
   return group.find((item) => !isCopyDisabled(item)) || group[0];
@@ -4622,6 +4741,8 @@ export async function state(options: ScopeOptions = {}) {
   const scoped = await projectRoots(options.projectCwds, projectWarnings);
   const policyResult = await readManagerState();
   const trash = await listTrash();
+  // 守门人按当前作用域判定成员资格（user 或 project:<identity,...>，与编组页签同一套取法）。
+  const scopeKey = await loadoutScopeKey(options);
   const result = {
     roots: [] as RootView[],
     // 创建、导入、仓库安装共用的用户级写入位置，由后端校验过可写性。
@@ -4629,6 +4750,8 @@ export async function state(options: ScopeOptions = {}) {
     projects: [] as {root?: string; name?: string; workspaceCwds?: string[]}[],
     summary: {total: 0, enabled: 0, disabled: 0, issues: 0},
     trash,
+    // 守门人开关下发给 UI：非成员技能显示"未加载"，开关含义变为"引用"。
+    gatekeeper: policyResult.state.gatekeeper !== false,
     warnings: [
       ...(policyResult.warning ? [policyResult.warning] : []),
       ...projectWarnings,
@@ -4659,7 +4782,7 @@ export async function state(options: ScopeOptions = {}) {
       });
     const skills: SkillView[] = [];
     for (const e of entries) {
-      const policy = effectiveSkillPolicy(policyResult, root, e);
+      const policy = effectiveSkillPolicy(policyResult, root, e, scopeKey);
       const managerEnabled =
         policyResult.writable !== false &&
         policy.sourceEnabled &&
@@ -4684,6 +4807,7 @@ export async function state(options: ScopeOptions = {}) {
         categoryId: policyResult.state.categoryMembers[root.key]?.[e.name] || null,
         customNote: policyResult.state.customNotes?.[root.key]?.[e.name] || null,
         linked: e.linked === true,
+        ...(policy.gated === true ? { gated: true } : {}),
       });
       all.push({
         root,

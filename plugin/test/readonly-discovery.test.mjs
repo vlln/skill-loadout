@@ -18,6 +18,8 @@ process.env.DSH_HOME = join(temp, "dsh");
 process.env.DSH_AGENTS_HOME = join(temp, "agents");
 process.env.DSH_CODEX_HOME = join(temp, "codex");
 const core = await import("../lib/core.js");
+// 本测试断言 v1 策略语义（默认启用、显式启停覆盖），显式关闭守门人（装了插件默认开）。
+await core.setGatekeeper(false);
 const linkType = process.platform === "win32" ? "junction" : "dir";
 async function skill(path, name) {
   await mkdir(path, { recursive: true });
