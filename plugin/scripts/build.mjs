@@ -5,10 +5,13 @@ import { access, rename, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { resolve, join } from "node:path";
 import { build } from "esbuild";
+import { readFileSync } from "node:fs";
+
+const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 const outputDirectory = resolve("lib");
-const stagingDirectory = resolve(`.dsh-skills-manager-build-${randomUUID()}`);
-const backupDirectory = resolve(`.dsh-skills-manager-build-backup-${randomUUID()}`);
+const stagingDirectory = resolve(`.dsh-loadout-build-${randomUUID()}`);
+const backupDirectory = resolve(`.dsh-loadout-build-backup-${randomUUID()}`);
 let previousOutputMoved = false;
 let published = false;
 
@@ -43,7 +46,7 @@ try {
     minify: true,
     define: { "process.env.NODE_ENV": "\"production\"" },
     banner: {
-      js: "window.__ModuleLoader__.load({ id: \"@michengai/dsh-skills-manager\", factory: (require) => {\nvar module = { exports: {} };\nvar exports = module.exports;",
+      js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(pkg.name)}, factory: (require) => {\nvar module = { exports: {} };\nvar exports = module.exports;`,
     },
     footer: { js: "return module.exports;\n} });" },
   });
