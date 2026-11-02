@@ -73,6 +73,10 @@ ok(
   loaded !== null && typeof loaded.factory === "function",
   "client bundle registers via window.__ModuleLoader__.load with a factory",
 );
+ok(
+  loaded.id === manifest.name,
+  "client bundle registers under the package name（写错 id 宿主报 loaded without registering）",
+);
 
 const bundle = loaded.factory((id) => {
   if (id === "react") return react;
