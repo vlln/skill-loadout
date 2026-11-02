@@ -1675,7 +1675,7 @@ function defaultManagerState() {
     disabledSkills[root.key] = [];
     enabledSkills[root.key] = [];
   }
-  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: /* @__PURE__ */ Object.create(null), categoryMembers: /* @__PURE__ */ Object.create(null), categoryOrder: /* @__PURE__ */ Object.create(null), customNotes: /* @__PURE__ */ Object.create(null), loadouts: [], activeLoadout: /* @__PURE__ */ Object.create(null), gatekeeper: true };
+  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: /* @__PURE__ */ Object.create(null), categoryMembers: /* @__PURE__ */ Object.create(null), categoryOrder: /* @__PURE__ */ Object.create(null), customNotes: /* @__PURE__ */ Object.create(null), loadouts: [], activeLoadout: /* @__PURE__ */ Object.create(null), sessionLoadouts: /* @__PURE__ */ Object.create(null), gatekeeper: true };
 }
 function validStateSkillName(name) {
   return validDiscoveryName(name);
@@ -1725,6 +1725,19 @@ function validActiveLoadout(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   for (const [scope, id] of Object.entries(value)) {
     if (!validLoadoutScopeKey(scope) || typeof id !== "string" || !LOADOUT_ID_RE.test(id)) return false;
+  }
+  return true;
+}
+const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
+function validSessionId(value) {
+  return typeof value === "string" && SESSION_ID_RE.test(value);
+}
+function validSessionLoadouts(value) {
+  if (value === void 0) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  for (const id of Object.values(value)) {
+    if (typeof id !== "string") return false;
+    if (id !== "" && !LOADOUT_ID_RE.test(id)) return false;
   }
   return true;
 }
@@ -1842,6 +1855,7 @@ function normalizeManagerState(value) {
   normalized.customNotes = normalizeCustomNotes(value.customNotes);
   normalized.loadouts = normalizeLoadouts(value.loadouts);
   normalized.activeLoadout = normalizeActiveLoadout(value.activeLoadout, normalized.loadouts);
+  normalized.sessionLoadouts = normalizeSessionLoadouts(value.sessionLoadouts, normalized.loadouts);
   return normalized;
 }
 const CATEGORY_NAME_MAX = 24;
@@ -1950,13 +1964,23 @@ function normalizeActiveLoadout(value, loadouts) {
   }
   return active;
 }
+function normalizeSessionLoadouts(value, loadouts) {
+  const overrides = /* @__PURE__ */ Object.create(null);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return overrides;
+  const known = new Set(loadouts.map((item) => item.id));
+  for (const [session, id] of Object.entries(value)) {
+    if (!validSessionId(session) || typeof id !== "string") continue;
+    if (id === "" || known.has(id)) overrides[session] = id;
+  }
+  return overrides;
+}
 async function readManagerState() {
   try {
     const raw = await fs.readFile(managerStatePath(), "utf8");
     const parsed = migrateManagerStateDocument(JSON.parse(raw));
     if (!validManagerStateDocument(parsed))
       throw codedError("invalid manager state schema", "error.state.invalid");
-    const loadoutWarning = validLoadouts(parsed.loadouts) && validActiveLoadout(parsed.activeLoadout) ? null : {
+    const loadoutWarning = validLoadouts(parsed.loadouts) && validActiveLoadout(parsed.activeLoadout) && validSessionLoadouts(parsed.sessionLoadouts) ? null : {
       code: "warning.loadout.invalid",
       params: { path: managerStatePath() },
       error: `loadout \u7F16\u7EC4\u6570\u636E\u65E0\u6548\uFF0C\u5DF2\u4E22\u5F03\u8BE5\u6BB5: ${managerStatePath()}`
@@ -2010,6 +2034,24 @@ function resolveActiveLoadout(state2, scopeKey) {
   const loadouts = Array.isArray(state2.loadouts) ? state2.loadouts : [];
   return loadouts.find((item) => item.id === id) || null;
 }
+function storedSessionLoadout(state2, sessionId) {
+  if (!validSessionId(sessionId)) return void 0;
+  const overrides = state2.sessionLoadouts;
+  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return void 0;
+  return Object.prototype.hasOwnProperty.call(overrides, sessionId) ? overrides[sessionId] : void 0;
+}
+function resolveEffectiveLoadout(state2, scopeKey, sessionId) {
+  const stored = storedSessionLoadout(state2, sessionId);
+  if (stored !== void 0) {
+    if (stored === "") return { loadout: null, source: "none", loadoutId: null, explicitNone: true };
+    const loadouts = Array.isArray(state2.loadouts) ? state2.loadouts : [];
+    const loadout = loadouts.find((item) => item.id === stored);
+    if (loadout) return { loadout, source: "session", loadoutId: loadout.id, explicitNone: false };
+  }
+  const active = resolveActiveLoadout(state2, scopeKey);
+  if (active) return { loadout: active, source: "scope", loadoutId: active.id, explicitNone: false };
+  return { loadout: null, source: "none", loadoutId: null, explicitNone: false };
+}
 function gatekeeperMember(active, root, entry) {
   if (!active) return false;
   for (const member of active.members) {
@@ -2018,7 +2060,7 @@ function gatekeeperMember(active, root, entry) {
   }
   return false;
 }
-function effectiveSkillPolicy(policyResult, root, entry, scopeKey = "user") {
+function effectiveSkillPolicy(policyResult, root, entry, scopeKey = "user", sessionId) {
   const override = managerSkillOverride(
     policyResult.state,
     root.key,
@@ -2036,7 +2078,7 @@ function effectiveSkillPolicy(policyResult, root, entry, scopeKey = "user") {
     };
   }
   if (policyResult.state.gatekeeper !== false && override !== true) {
-    const active = resolveActiveLoadout(policyResult.state, scopeKey);
+    const active = resolveEffectiveLoadout(policyResult.state, scopeKey, sessionId).loadout;
     if (!gatekeeperMember(active, root, entry)) {
       return {
         override,
@@ -2475,7 +2517,8 @@ async function writableLoadoutState() {
   const state2 = current.state;
   const loadouts = Array.isArray(state2.loadouts) ? state2.loadouts : state2.loadouts = [];
   const activeLoadout = state2.activeLoadout && typeof state2.activeLoadout === "object" && !Array.isArray(state2.activeLoadout) ? state2.activeLoadout : state2.activeLoadout = /* @__PURE__ */ Object.create(null);
-  return { state: state2, loadouts, activeLoadout };
+  const sessionLoadouts = state2.sessionLoadouts && typeof state2.sessionLoadouts === "object" && !Array.isArray(state2.sessionLoadouts) ? state2.sessionLoadouts : state2.sessionLoadouts = /* @__PURE__ */ Object.create(null);
+  return { state: state2, loadouts, activeLoadout, sessionLoadouts };
 }
 function findLoadout(loadouts, id) {
   return loadouts.find((item) => item.id === id);
@@ -2486,6 +2529,13 @@ async function loadoutScopeKey(options = {}) {
   const roots = await projectRoots(cwds);
   const ids = [...new Set(roots.map((root) => root.key.split(":").pop() || ""))].filter(Boolean).sort();
   return ids.length ? `project:${ids.join(",")}` : "user";
+}
+function sessionIdOf(options = {}) {
+  const explicit = options.sessionId;
+  if (validSessionId(explicit)) return explicit;
+  const scope = options.scope;
+  const carrier = scope && typeof scope === "object" ? scope.id : void 0;
+  return validSessionId(carrier) ? carrier : null;
 }
 async function checkedLoadoutMember(root, name, options = {}) {
   const rootKey = typeof root === "string" ? root : "";
@@ -2546,6 +2596,9 @@ async function deleteLoadout(id, log) {
   ready.state.loadouts = ready.loadouts.filter((item) => item.id !== id);
   for (const [scope, active] of Object.entries(ready.activeLoadout)) {
     if (active === id) delete ready.activeLoadout[scope];
+  }
+  for (const [session, selected] of Object.entries(ready.sessionLoadouts)) {
+    if (selected === id) delete ready.sessionLoadouts[session];
   }
   await writeManagerState(ready.state);
   if (log) log("loadout-delete", `\u5220\u9664\u7F16\u7EC4 ${loadout.name}\uFF08${id}\uFF09\uFF0C\u6280\u80FD\u672C\u8EAB\u4E0D\u53D7\u5F71\u54CD`);
@@ -2702,6 +2755,73 @@ async function listLoadouts(options = {}) {
     loadouts: current.state.loadouts || [],
     active: current.state.activeLoadout?.[scopeKey] || null,
     gatekeeper: current.state.gatekeeper !== false
+  };
+}
+async function setSessionLoadout(sessionId, loadoutId, log) {
+  const session = typeof sessionId === "string" ? sessionId.trim() : "";
+  if (!validSessionId(session))
+    return loadoutError("error.session.invalid", `\u4F1A\u8BDD\u6807\u8BC6\u65E0\u6548\uFF0C\u65E0\u6CD5\u8BB0\u5F55\u4F1A\u8BDD\u7F16\u7EC4: ${session}`, { sessionId: session });
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  if (loadoutId === void 0 || loadoutId === null) {
+    delete ready.sessionLoadouts[session];
+    await writeManagerState(ready.state);
+    if (log) log("loadout-session", `\u4F1A\u8BDD ${session} \u6E05\u9664\u7F16\u7EC4\u8986\u76D6\uFF08\u56DE\u843D\u4F5C\u7528\u57DF\uFF09`);
+    return { sessionId: session, loadoutId: null, cleared: true };
+  }
+  const chosen = String(loadoutId);
+  if (chosen === "") {
+    ready.sessionLoadouts[session] = "";
+    await writeManagerState(ready.state);
+    if (log) log("loadout-session", `\u4F1A\u8BDD ${session} \u9009\u62E9\u4E0D\u52A0\u8F7D\u4EFB\u4F55\u7F16\u7EC4`);
+    return { sessionId: session, loadoutId: "", cleared: false };
+  }
+  const loadout = findLoadout(ready.loadouts, chosen);
+  if (!loadout)
+    return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id: chosen });
+  ready.sessionLoadouts[session] = chosen;
+  await writeManagerState(ready.state);
+  if (log) log("loadout-session", `\u4F1A\u8BDD ${session} \u4F7F\u7528\u7F16\u7EC4 ${loadout.name}`);
+  return { sessionId: session, loadoutId: chosen, cleared: false };
+}
+async function effectiveLoadoutSkillNames(policyResult, loadout, scopeKey, sessionId, options) {
+  const names = [];
+  const seen = /* @__PURE__ */ new Set();
+  const scans = /* @__PURE__ */ new Map();
+  for (const member of loadout.members) {
+    const root = await resolvedCategoryRoot(member.root, options);
+    if (!root) continue;
+    let entries = scans.get(root.key);
+    if (!entries) {
+      entries = (await scanEntries(root)).entries;
+      scans.set(root.key, entries);
+    }
+    const entry = entries.find((item) => item.name === member.name);
+    if (!entry || entry.loadable === false) continue;
+    if (!effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId).enabled) continue;
+    if (seen.has(entry.name)) continue;
+    seen.add(entry.name);
+    names.push(entry.name);
+  }
+  return names;
+}
+async function sessionLoadoutView(sessionId, options = {}) {
+  const current = await readManagerState();
+  const session = validSessionId(sessionId) ? sessionId : null;
+  const scopeKey = await loadoutScopeKey(options);
+  const resolution = resolveEffectiveLoadout(current.state, scopeKey, session);
+  const skills = resolution.loadout ? await effectiveLoadoutSkillNames(current, resolution.loadout, scopeKey, session, options) : [];
+  const stored = storedSessionLoadout(current.state, session);
+  return {
+    sessionId: session,
+    scope: scopeKey,
+    loadoutId: stored === void 0 ? null : stored,
+    gatekeeper: current.state.gatekeeper !== false,
+    effective: {
+      source: resolution.source,
+      loadout: resolution.loadout,
+      skills
+    }
   };
 }
 async function safeExistingEntryPaths(root, name) {
@@ -3745,14 +3865,15 @@ async function listProviderCandidates(options = {}) {
   const userScans = await scanDeduplicatedRoots(user);
   const cwd = options && typeof options.cwd === "string" ? options.cwd : void 0;
   const scopeKey = await loadoutScopeKey({ projectCwds: cwd ? [cwd] : [] });
+  const sessionId = sessionIdOf(options);
   const items = user.flatMap(
-    (root) => userScans.get(root.key).entries.map((entry) => ({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey) }))
+    (root) => userScans.get(root.key).entries.map((entry) => ({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId) }))
   );
   if (cwd) {
     const roots = await projectRoots([cwd]);
     for (const root of roots) {
       const scanned = (await scanDeduplicatedRoots([root])).get(root.key);
-      for (const entry of scanned.entries) items.push({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey) });
+      for (const entry of scanned.entries) items.push({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId) });
     }
   }
   for (const group of groupLoadableSkillsByName(items).values()) {
@@ -3953,6 +4074,7 @@ async function state(options = {}) {
   const policyResult = await readManagerState();
   const trash = await listTrash();
   const scopeKey = await loadoutScopeKey(options);
+  const sessionId = sessionIdOf(options);
   const result = {
     roots: [],
     // 创建、导入、仓库安装共用的用户级写入位置，由后端校验过可写性。
@@ -3987,7 +4109,7 @@ async function state(options = {}) {
       });
     const skills = [];
     for (const e of entries) {
-      const policy = effectiveSkillPolicy(policyResult, root, e, scopeKey);
+      const policy = effectiveSkillPolicy(policyResult, root, e, scopeKey, sessionId);
       const managerEnabled = policyResult.writable !== false && policy.sourceEnabled && policy.override !== false;
       skills.push({
         name: e.name,
@@ -4132,18 +4254,22 @@ export {
   resolveActiveLoadout,
   resolveAgentsHome,
   resolveDshHome,
+  resolveEffectiveLoadout,
   resolveEntry,
   resolveWorkspaceTarget,
   restoreTrash,
   rootPathConfigPath,
   scanCustomSourceCandidates,
   scanEntries,
+  sessionIdOf,
+  sessionLoadoutView,
   setCategoryEnabled,
   setGatekeeper,
   setLoadoutEnabled,
   setLoadoutNote,
   setOnlineUpdate,
   setRootPath,
+  setSessionLoadout,
   setSidebarEntry,
   setSkillEnabled,
   setSkillNote,
@@ -4151,6 +4277,7 @@ export {
   setSourceEnabled,
   skillDetail,
   state,
+  storedSessionLoadout,
   toKebab,
   trashRootPath,
   unquote,

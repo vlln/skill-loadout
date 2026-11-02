@@ -113,3 +113,42 @@ scope 的取法照现有 ScopeOptions（user / project cwds）。
 ## 完成定义
 
 同 v1，外加：假数据驱动 `effectiveSkillPolicy` 的断言逐条对应上面的判定顺序。
+
+---
+
+# v3：会话级编组控制 + composer 可见性
+
+2026-11-02，用户定的体验方向：控制权放在对话里，可替换、可观察。
+
+## 概念
+
+- **会话级选择**：每个 session 可以选一个自己的编组（或"不加载"），覆盖 scope 默认。
+- **可观察**：会话里有一个常驻控件，点开能看见当前编组与生效的技能名清单。
+- 生效顺序：`sessionLoadouts[sessionId]` → `activeLoadout[scopeKey]` → 空（什么都不加载）。
+
+## 机制
+
+1. 状态：`ManagerState.sessionLoadouts?: Record<sessionId, loadoutId>`，校验照 loadouts 的写法（sessionId 非法/编组不存在 → 视为未选）。
+2. `effectiveSkillPolicy` 增加 session 上下文：调用方传入 sessionId（agent-scoped provider 用 `agent.id`——运行时 `Agent.id` 就是 SessionId；`state()` 用请求头里的会话）。
+3. agent-scoped provider 的 `listProviderCandidates` 要带上 sessionId（`options.sessionId`）。
+4. 新路由：
+   - `GET /session-loadout?sessionId=...` → `{ sessionId, loadoutId, effective: {source: "session"|"scope"|"none", loadout, skills: [names] } }`
+   - `POST /session-loadout` `{ sessionId, loadoutId|null }` → 写覆盖（null = 显式"不加载"用空字符串？用 `loadoutId: ""` 表示显式空；缺省字段 = 回落 scope）。写后 afterWrite 失效 provider + 菜单缓存。
+
+## composer 控件（client half）
+
+- 注册到 `conversation.input.dock`：`ctx.slots.register({ name: "conversation.input.dock", id: "loadout", order: 30, locale: NS, inject: (sessionId) => ... })`——`inject` 收到 sessionId 是本功能的立足点（对照官方 queue dock 的写法）。
+- 收起态：`<button>` 显示 `编组 · <名>` 或 `未加载编组`；带当前技能数。
+- 展开：自绘 popover（用宿主 Button/Tag 原语），内容三块：编组单选列表（含「不加载」）、当前生效技能名清单（最多 8 行，超出显示"还有 N 张"）、「在插件里管理」按钮（打开插件页）。
+- 切换调用 `POST /session-loadout`，成功后重新拉 `GET /session-loadout`。
+
+## 测试
+
+- core：session 覆盖优先于 scope；未选回落 scope；显式空则不加载；非法 sessionId/编组 id 视为未选；切换后 effective 变化。
+- 路由：GET 形状、POST 变更头校验（负控 403）。
+- provider：带 sessionId 时按会话判定（非成员不发布候选）。
+- 客户端：控件渲染文案（有编组/未加载两种）、popover 列表项。
+
+## 完成定义
+
+`pnpm build`、`tsc --noEmit`、`check-committed-lib`、loadout 测试全绿；既有可过测试不退化；隔离实例里用两个 session 验证互不影响。

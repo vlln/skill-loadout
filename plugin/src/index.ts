@@ -31,6 +31,8 @@ import {
   setLoadoutEnabled,
   applyLoadout,
   listLoadouts,
+  setSessionLoadout,
+  sessionLoadoutView,
   importSkill,
   importUploadedSkill,
   browseDirectories,
@@ -240,7 +242,11 @@ function activeSessionCwds(ctx: HostContext, sessionId: unknown) {
   return typeof cwd === "string" && cwd.trim() ? [cwd.trim()] : [];
 }
 
-function externalSkillProvider(control: ProviderControl, invalidators: Set<() => void>) {
+/**
+ * 外部技能 provider。`sessionId` 只由 agent-scoped 注册传入（运行时 `Agent.id` 就是 SessionId）：
+ * 会话级编组覆盖必须按会话判定，全局层的 provider 没有会话上下文。
+ */
+function externalSkillProvider(control: ProviderControl, invalidators: Set<() => void>, sessionId?: string) {
   invalidators.add(control.invalidate);
   if (control.signal && typeof control.signal.addEventListener === "function") {
     control.signal.addEventListener("abort", () => {
@@ -249,7 +255,7 @@ function externalSkillProvider(control: ProviderControl, invalidators: Set<() =>
   }
   return {
     name: "dsh-loadout-external",
-    list: async (options?: ScopeOptions) => listProviderCandidates(options),
+    list: async (options?: ScopeOptions) => listProviderCandidates(sessionId ? { ...(options || {}), sessionId } : options),
     get: async (candidate: ProviderCandidate, options?: ScopeOptions) => getProviderSkill(candidate, options),
   };
 }
@@ -270,7 +276,8 @@ function registerAgentSkillProviders(ctx: HostContext, invalidators: Set<() => v
       ? agentCtx.get("skills")
       : agentCtx && agentCtx.skills;
     if (!skills || typeof skills.registerProvider !== "function") return;
-    const dispose = skills.registerProvider((control) => externalSkillProvider(control, invalidators));
+    // 会话级编组按 Agent.id 判定：同一份策略在不同会话里可以加载不同的编组。
+    const dispose = skills.registerProvider((control) => externalSkillProvider(control, invalidators, agent.id));
     registrations.set(agent.id, dispose);
   };
 
@@ -378,6 +385,15 @@ function apply(ctx: HostContext, config?: PluginConfig) {
 
   const API_PREFIX = "/api/vlln/dsh-loadout";
   const projectOptions = (sessionId?: string | null) => ({ projectCwds: activeSessionCwds(ctx, sessionId ?? undefined) });
+  // 请求头里的会话来源：列表页与 composer 控件共用同一套会话解析。
+  const requestSessionId = (req: Request) => {
+    const value = req.headers.get("x-dsh-skills-session");
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  };
+  const sessionOptions = (sessionId?: string | null): ScopeOptions => ({
+    ...projectOptions(sessionId),
+    ...(sessionId ? { sessionId } : {}),
+  });
   const workspaceTarget = async (body: RequestBody) => {
     if (body.workspace === undefined) return null;
     return resolveWorkspaceTarget(body.workspace, registeredWorkspacePaths(ctx));
@@ -401,7 +417,7 @@ function apply(ctx: HostContext, config?: PluginConfig) {
     } catch (caught) { const error = caught as CodedError; snapshot.warnings.push({ code: "error.repo.state", error: error.message }); }
     return snapshot;
   };
-  const stateWithSources = async (req: Request) => attachSources(await state(projectOptions(req.headers.get("x-dsh-skills-session"))));
+  const stateWithSources = async (req: Request) => attachSources(await state(sessionOptions(requestSessionId(req))));
 
   const handlePost = async (
     req: Request,
@@ -766,6 +782,32 @@ function apply(ctx: HostContext, config?: PluginConfig) {
       fetch: (req) => handlePost(req, (b, scope) => applyLoadout(String(b.id || ""), { exclusive: b.exclusive === true }, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite }),
     },
     {
+      // 会话级编组覆盖：composer 控件读写它。会话覆盖会改变该会话生效的技能集，
+      // 写后必须失效 provider 与斜杠菜单缓存。
+      path: `${API_PREFIX}/session-loadout`,
+      methods: ["GET", "HEAD", "POST"],
+      fetch: (req) => {
+        if (req.method === "GET" || req.method === "HEAD") {
+          // 显式 ?sessionId= 优先；缺省回落到请求头里的会话来源（设置页/侧栏面板自己没有显式 id）。
+          const requested = new URL(req.url).searchParams.get("sessionId") || requestSessionId(req) || null;
+          return runFetch(() => sessionLoadoutView(requested, sessionOptions(requested)), undefined, req.method === "HEAD");
+        }
+        return handlePost(req, async (b) => {
+          const bodySession = b.sessionId;
+          if (bodySession !== undefined && bodySession !== null && typeof bodySession !== "string") {
+            throw Object.assign(new Error("sessionId 必须是字符串"), { statusCode: 400, code: "error.session.invalid" });
+          }
+          const sessionId = typeof bodySession === "string" && bodySession.trim() ? bodySession.trim() : (requestSessionId(req) || "");
+          if (b.loadoutId !== undefined && b.loadoutId !== null && typeof b.loadoutId !== "string") {
+            throw Object.assign(new Error("loadoutId 必须是字符串或 null"), { statusCode: 400, code: "error.proto.invalidParams" });
+          }
+          // 缺省 / null = 清除覆盖（回落 scope）；"" = 显式不加载；其余按编组 id 校验。
+          const loadoutId = b.loadoutId === undefined || b.loadoutId === null ? null : String(b.loadoutId);
+          return setSessionLoadout(sessionId, loadoutId, log);
+        }, { afterSuccess: afterWrite });
+      },
+    },
+    {
       path: `${API_PREFIX}/delete`,
       methods: ["POST"],
       fetch: (req) => handlePost(req, async (b, scope) => {
@@ -925,4 +967,4 @@ function apply(ctx: HostContext, config?: PluginConfig) {
 export { activeSessionCwds, apply, inject, name, notifyChatCatalog, registerAgentSkillProviders };
 
 /** 请求体由各业务入口现有校验解析，此类型只声明路由转交的字段。 */
-type RequestBody = CreateInput & UploadInput & SkillRequest & RepositoryInput & {root?: string; source?: string; conflict?: string; dryRun?: boolean; workspace?: unknown; enabled?: boolean; referenced?: boolean; category?: string; targetName?: string; position?: "before" | "after"; catalog?: string; skillId?: string; owner?: string; slug?: string; path?: unknown; key?: string; id?: string; label?: unknown; group?: unknown; sources?: unknown[]; note?: string; members?: unknown; exclusive?: unknown};
+type RequestBody = CreateInput & UploadInput & SkillRequest & RepositoryInput & {root?: string; source?: string; conflict?: string; dryRun?: boolean; workspace?: unknown; enabled?: boolean; referenced?: boolean; category?: string; targetName?: string; position?: "before" | "after"; catalog?: string; skillId?: string; owner?: string; slug?: string; path?: unknown; key?: string; id?: string; label?: unknown; group?: unknown; sources?: unknown[]; note?: string; members?: unknown; exclusive?: unknown; sessionId?: unknown; loadoutId?: unknown};

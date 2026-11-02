@@ -2077,7 +2077,7 @@ function defaultManagerState(): ManagerState {
     disabledSkills[root.key] = [];
     enabledSkills[root.key] = [];
   }
-  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: Object.create(null), categoryMembers: Object.create(null), categoryOrder: Object.create(null), customNotes: Object.create(null), loadouts: [], activeLoadout: Object.create(null), gatekeeper: true };
+  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: Object.create(null), categoryMembers: Object.create(null), categoryOrder: Object.create(null), customNotes: Object.create(null), loadouts: [], activeLoadout: Object.create(null), sessionLoadouts: Object.create(null), gatekeeper: true };
 }
 
 function validStateSkillName(name: unknown): name is string {
@@ -2143,6 +2143,31 @@ function validActiveLoadout(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   for (const [scope, id] of Object.entries(value)) {
     if (!validLoadoutScopeKey(scope) || typeof id !== "string" || !LOADOUT_ID_RE.test(id)) return false;
+  }
+  return true;
+}
+
+/**
+ * 会话 id 是不透明字符串（形如 `session-<uuid>`），只做字符集与长度约束：
+ * 不解析结构，也不假设某个宿主的命名规则。
+ */
+const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
+
+function validSessionId(value: unknown): value is string {
+  return typeof value === "string" && SESSION_ID_RE.test(value);
+}
+
+/**
+ * sessionLoadouts 段：值是 loadout id，或 ""（显式不加载）。
+ * 与 activeLoadout 一样按严格形状整段校验；键（sessionId）本身不卡字符集，
+ * 非法会话键由 normalizeSessionLoadouts 逐项丢弃 = 「视为未选」。
+ */
+function validSessionLoadouts(value: unknown) {
+  if (value === undefined) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  for (const id of Object.values(value)) {
+    if (typeof id !== "string") return false;
+    if (id !== "" && !LOADOUT_ID_RE.test(id)) return false;
   }
   return true;
 }
@@ -2296,6 +2321,7 @@ function normalizeManagerState(value: ManagerState) {
   normalized.customNotes = normalizeCustomNotes(value.customNotes);
   normalized.loadouts = normalizeLoadouts(value.loadouts);
   normalized.activeLoadout = normalizeActiveLoadout(value.activeLoadout, normalized.loadouts);
+  normalized.sessionLoadouts = normalizeSessionLoadouts(value.sessionLoadouts, normalized.loadouts);
   return normalized;
 }
 
@@ -2413,6 +2439,18 @@ function normalizeActiveLoadout(value: ManagerState["activeLoadout"] | undefined
   return active;
 }
 
+/** 会话覆盖逐项清洗：sessionId 非法或引用的编组不存在 → 视为未选（回落到 scope），"" 保留为显式不加载。 */
+function normalizeSessionLoadouts(value: ManagerState["sessionLoadouts"] | undefined, loadouts: Loadout[]) {
+  const overrides: NonNullable<ManagerState["sessionLoadouts"]> = Object.create(null);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return overrides;
+  const known = new Set(loadouts.map((item) => item.id));
+  for (const [session, id] of Object.entries(value)) {
+    if (!validSessionId(session) || typeof id !== "string") continue;
+    if (id === "" || known.has(id)) overrides[session] = id;
+  }
+  return overrides;
+}
+
 export async function readManagerState(): Promise<PolicyResult> {
   try {
     const raw = await fs.readFile(managerStatePath(), "utf8");
@@ -2422,7 +2460,7 @@ export async function readManagerState(): Promise<PolicyResult> {
       throw codedError("invalid manager state schema", "error.state.invalid");
     // loadout 段独立于整体 schema：坏数据只丢弃该段并记 warning，不把整个状态打入只读。
     const loadoutWarning: Diagnostic | null =
-      validLoadouts(parsed.loadouts) && validActiveLoadout(parsed.activeLoadout)
+      validLoadouts(parsed.loadouts) && validActiveLoadout(parsed.activeLoadout) && validSessionLoadouts(parsed.sessionLoadouts)
         ? null
         : {
             code: "warning.loadout.invalid",
@@ -2483,6 +2521,46 @@ export function resolveActiveLoadout(state: ManagerState, scopeKey: string): Loa
   return loadouts.find((item) => item.id === id) || null;
 }
 
+/**
+ * 会话级编组解析结果。`source` 说明生效编组从哪来：
+ * - "session"：会话覆盖命中了一个存在的编组；
+ * - "scope"：会话没有覆盖（或覆盖悬空），回落到 scope 的 activeLoadout；
+ * - "none"：什么都不加载（无任何编组，或会话显式选了「不加载」）。
+ */
+export interface EffectiveLoadout {
+    loadout: Loadout | null;
+    source: "session" | "scope" | "none";
+    /** 生效编组的 id；没有生效编组时为 null。 */
+    loadoutId: string | null;
+    /** 会话显式选择了「不加载」（sessionLoadouts[sessionId] === ""）。 */
+    explicitNone: boolean;
+}
+
+/** 会话存储的原始覆盖值：undefined 表示没有覆盖（回落 scope），"" 表示显式不加载。 */
+export function storedSessionLoadout(state: ManagerState, sessionId: string | null | undefined): string | undefined {
+  if (!validSessionId(sessionId)) return undefined;
+  const overrides = state.sessionLoadouts;
+  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return undefined;
+  return Object.prototype.hasOwnProperty.call(overrides, sessionId) ? overrides[sessionId] : undefined;
+}
+
+/**
+ * 生效顺序：sessionLoadouts[sessionId] → activeLoadout[scopeKey] → 空（什么都不加载）。
+ * 会话 id 非法、覆盖悬空或覆盖了不存在的编组都视为未选，回落到 scope。
+ */
+export function resolveEffectiveLoadout(state: ManagerState, scopeKey: string, sessionId?: string | null): EffectiveLoadout {
+  const stored = storedSessionLoadout(state, sessionId);
+  if (stored !== undefined) {
+    if (stored === "") return { loadout: null, source: "none", loadoutId: null, explicitNone: true };
+    const loadouts = Array.isArray(state.loadouts) ? state.loadouts : [];
+    const loadout = loadouts.find((item) => item.id === stored);
+    if (loadout) return { loadout, source: "session", loadoutId: loadout.id, explicitNone: false };
+  }
+  const active = resolveActiveLoadout(state, scopeKey);
+  if (active) return { loadout: active, source: "scope", loadoutId: active.id, explicitNone: false };
+  return { loadout: null, source: "none", loadoutId: null, explicitNone: false };
+}
+
 /** 成员资格按"去重后任一副本"判定：成员引用可以指向被去重隐藏的副本（policyAliases）。 */
 function gatekeeperMember(active: Loadout | null, root: SkillRoot, entry: SkillEntry) {
   if (!active) return false;
@@ -2497,10 +2575,11 @@ function gatekeeperMember(active: Loadout | null, root: SkillRoot, entry: SkillE
  * 单技能生效判定。判定顺序（不可写状态、来源停用等硬条件照旧优先）：
  * 1. 手动排除（override === false）→ 禁用；
  * 2. 手动引用（override === true）→ 启用；
- * 3. 守门人开 → 仅当前 scope 的 activeLoadout 成员启用，其余禁用（gated，无 activeLoadout 时全不加载）；
- * 4. 守门人关 → 现状（默认启用）。
+ * 3. 守门人开 → 仅当前会话/作用域生效编组的成员启用，其余禁用（gated，没有编组时全不加载）；
+ *    会话覆盖（sessionId）优先于 scope 的 activeLoadout；
+ * 4. 守门人关 → 现状（默认启用），会话覆盖不参与判定。
  */
-export function effectiveSkillPolicy(policyResult: PolicyResult, root: SkillRoot, entry: SkillEntry, scopeKey: string = "user"): Policy {
+export function effectiveSkillPolicy(policyResult: PolicyResult, root: SkillRoot, entry: SkillEntry, scopeKey: string = "user", sessionId?: string | null): Policy {
   const override = managerSkillOverride(
     policyResult.state,
     root.key,
@@ -2520,7 +2599,7 @@ export function effectiveSkillPolicy(policyResult: PolicyResult, root: SkillRoot
     };
   }
   if (policyResult.state.gatekeeper !== false && override !== true) {
-    const active = resolveActiveLoadout(policyResult.state, scopeKey);
+    const active = resolveEffectiveLoadout(policyResult.state, scopeKey, sessionId).loadout;
     if (!gatekeeperMember(active, root, entry)) {
       return {
         override,
@@ -3021,7 +3100,11 @@ async function writableLoadoutState() {
     state.activeLoadout && typeof state.activeLoadout === "object" && !Array.isArray(state.activeLoadout)
       ? state.activeLoadout
       : (state.activeLoadout = Object.create(null));
-  return { state, loadouts, activeLoadout };
+  const sessionLoadouts =
+    state.sessionLoadouts && typeof state.sessionLoadouts === "object" && !Array.isArray(state.sessionLoadouts)
+      ? state.sessionLoadouts
+      : (state.sessionLoadouts = Object.create(null));
+  return { state, loadouts, activeLoadout, sessionLoadouts };
 }
 
 function findLoadout(loadouts: Loadout[], id: string) {
@@ -3035,6 +3118,18 @@ async function loadoutScopeKey(options: ScopeOptions = {}) {
   const roots = await projectRoots(cwds);
   const ids = [...new Set(roots.map((root) => root.key.split(":").pop() || ""))].filter(Boolean).sort();
   return ids.length ? `project:${ids.join(",")}` : "user";
+}
+
+/**
+ * 从调用选项里取会话 id：显式 `sessionId` 优先；宿主把它当 scope 键传进来时，
+ * 退到 `options.scope` 上的 Agent（运行时 `Agent.id` 就是 SessionId）。都取不到返回 null。
+ */
+export function sessionIdOf(options: ScopeOptions = {}): string | null {
+  const explicit = (options as unknown as Record<string, unknown>).sessionId;
+  if (validSessionId(explicit)) return explicit;
+  const scope = (options as unknown as Record<string, unknown>).scope;
+  const carrier = scope && typeof scope === "object" ? (scope as { id?: unknown }).id : undefined;
+  return validSessionId(carrier) ? carrier : null;
 }
 
 /** 校验并规范化一条成员引用；返回规范后的 {root, name} 或错误。 */
@@ -3100,6 +3195,10 @@ export async function deleteLoadout(id: string, log?: Log) {
   ready.state.loadouts = ready.loadouts.filter((item) => item.id !== id);
   for (const [scope, active] of Object.entries(ready.activeLoadout)) {
     if (active === id) delete ready.activeLoadout[scope];
+  }
+  // 会话覆盖也指向这个编组：删掉后按「未选」回落 scope，不留悬空引用。
+  for (const [session, selected] of Object.entries(ready.sessionLoadouts)) {
+    if (selected === id) delete ready.sessionLoadouts[session];
   }
   await writeManagerState(ready.state);
   if (log) log("loadout-delete", `删除编组 ${loadout.name}（${id}），技能本身不受影响`);
@@ -3268,6 +3367,92 @@ export async function listLoadouts(options: ScopeOptions = {}) {
     loadouts: current.state.loadouts || [],
     active: current.state.activeLoadout?.[scopeKey] || null,
     gatekeeper: current.state.gatekeeper !== false,
+  };
+}
+
+/**
+ * 写会话级编组覆盖：`loadoutId` 为 `""` 表示该会话显式「不加载」；
+ * `null` / `undefined` 清除覆盖（回落到 scope 的 activeLoadout）。
+ * 会话 id 非法或编组不存在都拒绝，不写入坏数据。
+ */
+export async function setSessionLoadout(sessionId: string, loadoutId: string | null | undefined, log?: Log) {
+  const session = typeof sessionId === "string" ? sessionId.trim() : "";
+  if (!validSessionId(session))
+    return loadoutError("error.session.invalid", `会话标识无效，无法记录会话编组: ${session}`, { sessionId: session });
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  if (loadoutId === undefined || loadoutId === null) {
+    delete ready.sessionLoadouts[session];
+    await writeManagerState(ready.state);
+    if (log) log("loadout-session", `会话 ${session} 清除编组覆盖（回落作用域）`);
+    return { sessionId: session, loadoutId: null, cleared: true };
+  }
+  const chosen = String(loadoutId);
+  if (chosen === "") {
+    ready.sessionLoadouts[session] = "";
+    await writeManagerState(ready.state);
+    if (log) log("loadout-session", `会话 ${session} 选择不加载任何编组`);
+    return { sessionId: session, loadoutId: "", cleared: false };
+  }
+  const loadout = findLoadout(ready.loadouts, chosen);
+  if (!loadout)
+    return loadoutError("error.loadout.notFound", "编组不存在", { id: chosen });
+  ready.sessionLoadouts[session] = chosen;
+  await writeManagerState(ready.state);
+  if (log) log("loadout-session", `会话 ${session} 使用编组 ${loadout.name}`);
+  return { sessionId: session, loadoutId: chosen, cleared: false };
+}
+
+/**
+ * 生效技能名：编组成员里真实存在、可加载且当前确实会加载的那些。
+ * 判定复用 effectiveSkillPolicy，因此手动排除、来源停用、会话覆盖都与宿主候选一致。
+ */
+async function effectiveLoadoutSkillNames(policyResult: PolicyResult, loadout: Loadout, scopeKey: string, sessionId: string | null, options: ScopeOptions) {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const scans = new Map<string, SkillEntry[]>();
+  for (const member of loadout.members) {
+    const root = await resolvedCategoryRoot(member.root, options);
+    if (!root) continue;
+    let entries = scans.get(root.key);
+    if (!entries) {
+      entries = (await scanEntries(root)).entries;
+      scans.set(root.key, entries);
+    }
+    const entry = entries.find((item) => item.name === member.name);
+    if (!entry || entry.loadable === false) continue;
+    if (!effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId).enabled) continue;
+    if (seen.has(entry.name)) continue;
+    seen.add(entry.name);
+    names.push(entry.name);
+  }
+  return names;
+}
+
+/**
+ * 会话编组视图（composer 控件与 GET /session-loadout 的数据源）：
+ * `loadoutId` 是会话存储的原始覆盖值（null = 未覆盖、"" = 显式不加载、id = 选中）；
+ * `effective` 描述真正生效的编组与技能名清单。
+ */
+export async function sessionLoadoutView(sessionId: string | null | undefined, options: ScopeOptions = {}) {
+  const current = await readManagerState();
+  const session = validSessionId(sessionId) ? sessionId : null;
+  const scopeKey = await loadoutScopeKey(options);
+  const resolution = resolveEffectiveLoadout(current.state, scopeKey, session);
+  const skills = resolution.loadout
+    ? await effectiveLoadoutSkillNames(current, resolution.loadout, scopeKey, session, options)
+    : [];
+  const stored = storedSessionLoadout(current.state, session);
+  return {
+    sessionId: session,
+    scope: scopeKey,
+    loadoutId: stored === undefined ? null : stored,
+    gatekeeper: current.state.gatekeeper !== false,
+    effective: {
+      source: resolution.source,
+      loadout: resolution.loadout,
+      skills,
+    },
   };
 }
 
@@ -4454,16 +4639,18 @@ export async function listProviderCandidates(options: ScopeOptions = {}) {
   const userScans = await scanDeduplicatedRoots(user);
   const cwd =
     options && typeof options.cwd === "string" ? options.cwd : undefined;
-  // 守门人按会话作用域判定：有项目 cwd 时用项目作用域键，否则用户作用域（与 loadoutScopeKey 一致）。
+  // 守门人按会话作用域判定：有项目 cwd 时用项目作用域键，否则用户作用域（与 loadoutScopeKey 一致）；
+  // 会话级覆盖（sessionId 来自 agent-scoped provider 或宿主注入的 scope）优先于作用域默认。
   const scopeKey = await loadoutScopeKey({ projectCwds: cwd ? [cwd] : [] });
+  const sessionId = sessionIdOf(options);
   const items = user.flatMap((root) =>
-    userScans.get(root.key)!.entries.map((entry) => ({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey) })),
+    userScans.get(root.key)!.entries.map((entry) => ({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId) })),
   );
   if (cwd) {
     const roots = await projectRoots([cwd]);
     for (const root of roots) {
       const scanned = (await scanDeduplicatedRoots([root])).get(root.key)!;
-      for (const entry of scanned.entries) items.push({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey) });
+      for (const entry of scanned.entries) items.push({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId) });
     }
   }
   for (const group of groupLoadableSkillsByName(items).values()) {
@@ -4741,8 +4928,10 @@ export async function state(options: ScopeOptions = {}) {
   const scoped = await projectRoots(options.projectCwds, projectWarnings);
   const policyResult = await readManagerState();
   const trash = await listTrash();
-  // 守门人按当前作用域判定成员资格（user 或 project:<identity,...>，与编组页签同一套取法）。
+  // 守门人按当前作用域判定成员资格（user 或 project:<identity,...>，与编组页签同一套取法）；
+  // 会话级覆盖（sessionId 来自请求头或 agent-scoped provider 的 Agent.id）优先于作用域默认。
   const scopeKey = await loadoutScopeKey(options);
+  const sessionId = sessionIdOf(options);
   const result = {
     roots: [] as RootView[],
     // 创建、导入、仓库安装共用的用户级写入位置，由后端校验过可写性。
@@ -4782,7 +4971,7 @@ export async function state(options: ScopeOptions = {}) {
       });
     const skills: SkillView[] = [];
     for (const e of entries) {
-      const policy = effectiveSkillPolicy(policyResult, root, e, scopeKey);
+      const policy = effectiveSkillPolicy(policyResult, root, e, scopeKey, sessionId);
       const managerEnabled =
         policyResult.writable !== false &&
         policy.sourceEnabled &&

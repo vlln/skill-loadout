@@ -15,8 +15,20 @@ export type RepositoryRoutes = {
     [K in keyof Manager as K extends 'sources' | 'list' | 'restoreTrash' | 'rememberCatalogInstall' | 'forgetCatalogInstall' | 'installCatalog' | 'trashSkill' | 'permanentlyDeleteTrash' ? never : `/repositories/${K}`]: Awaited<ReturnType<Manager[K]>>;
 };
 type SkillsShSearchPath = `/skills-sh/search?q=${string}`;
+/** 会话级编组视图：loadoutId 是会话存储的原始覆盖（null = 未覆盖、空串 = 显式不加载、id = 选中）。 */
+export type SessionLoadoutView = {
+    sessionId: string | null;
+    scope: string;
+    loadoutId: string | null;
+    gatekeeper?: boolean;
+    effective: {
+        source: 'session' | 'scope' | 'none';
+        loadout: Loadout | null;
+        skills: string[];
+    };
+};
 type SkillsShSearchResult = { skills: { id: string; source: string; skillId: string; name: string; installs?: number }[] };
-export type ApiRoutes = RepositoryRoutes & Record<SkillsShSearchPath, SkillsShSearchResult> & Record<`/clawhub/list?${string}`, ClawHubPage> & Record<`/clawhub/search?${string}`, ClawHubSearchResponse> & {
+export type ApiRoutes = RepositoryRoutes & Record<SkillsShSearchPath, SkillsShSearchResult> & Record<`/clawhub/list?${string}`, ClawHubPage> & Record<`/clawhub/search?${string}`, ClawHubSearchResponse> & Record<`/session-loadout?${string}`, SessionLoadoutView> & {
     '/repositories': Awaited<ReturnType<Manager['list']>>;
     '/state': ManagerSnapshot;
     '/workspaces': { items: Awaited<ReturnType<typeof listWorkspaces>> };
@@ -56,6 +68,7 @@ export type ApiRoutes = RepositoryRoutes & Record<SkillsShSearchPath, SkillsShSe
     '/loadout-remove': unknown;
     '/loadout-toggle': { id: string; enabled: boolean; changed: number; skipped: string[] };
     '/loadout-apply': { id: string; scope: string; exclusive: boolean; applied: number; skipped: string[]; disabledOthers: number };
+    '/session-loadout': SessionLoadoutView;
     '/skill-reference': unknown;
     '/sidebar-entry': { enabled: boolean };
     '/online-update': { enabled: boolean };

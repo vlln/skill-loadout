@@ -114,6 +114,11 @@ export interface ManagerState {
     loadouts?: Loadout[];
     /** 每个作用域当前应用的 loadout：键为 "user" 或 "project:<identity,...>"，值为 loadout id。 */
     activeLoadout?: Record<string, string>;
+    /**
+     * 会话级编组覆盖：键为 sessionId，值为 loadout id。
+     * 值为 "" 表示该会话显式「不加载」；没有该键表示回落到 scope 的 activeLoadout。
+     */
+    sessionLoadouts?: Record<string, string>;
     /** 守门人模式：开启后只有当前编组成员与被手动引用的技能加载。默认 true。 */
     gatekeeper?: boolean;
 }
@@ -293,6 +298,8 @@ export interface ScopeOptions {
     projectCwds?: string[];
     cwd?: string;
     signal?: AbortSignal;
+    /** 会话级编组覆盖的会话 id；缺省表示只看 scope（user / project:<identity,...>）。 */
+    sessionId?: string;
 }
 export interface RenameOptions {
     rename?: (source: string, destination: string) => Promise<void>;

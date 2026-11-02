@@ -24,6 +24,10 @@ const {
   applyLoadout,
   currentLoadout,
   listLoadouts,
+  setSessionLoadout,
+  sessionLoadoutView,
+  resolveEffectiveLoadout,
+  storedSessionLoadout,
   readManagerState,
   state,
   projectRoots,
@@ -359,6 +363,90 @@ assert.equal((await listProviderCandidates()).find((item) => item.name === "beta
 assert.equal((await listProviderCandidates()).find((item) => item.name === "codex-other").invocation.modelInvocable, true, "关闭后外部技能恢复提供");
 assert.equal((await state({ projectCwds: [gatedWs] })).roots.find((root) => root.key === gatedProjectRoot.key).skills.find((item) => item.name === "delta").enabled, true, "关闭后项目技能恢复默认启用");
 
+// ── 会话级编组（v3）：会话覆盖 → scope 默认 → 空（什么都不加载）─────────────────
+await setGatekeeper(true);
+const scopeDefault = await createLoadout("会话默认", undefined, [{ root: "dsh", name: "alpha" }]);
+const sessionSetA = await createLoadout("会话甲", undefined, [{ root: "codex", name: "codex-skill" }]);
+const sessionSetB = await createLoadout("会话乙", undefined, [{ root: "dsh", name: "beta" }]);
+await applyLoadout(scopeDefault.loadout.id, {}, undefined);
+assert.equal(await dshEnabled("alpha"), true, "scope 默认编组成员加载");
+const sessionA = "session-aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+const sessionB = "session-bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb";
+const sessionEnabled = async (sessionId, rootKey, name) => {
+  const snapshot = await state({ sessionId });
+  return snapshot.roots.find((root) => root.key === rootKey).skills.find((item) => item.name === name).enabled;
+};
+
+const selected = await setSessionLoadout(sessionA, sessionSetA.loadout.id);
+assert.equal(selected.ok, undefined);
+assert.equal(selected.loadoutId, sessionSetA.loadout.id);
+const viewA = await sessionLoadoutView(sessionA);
+assert.equal(viewA.sessionId, sessionA, "GET 形状：回传会话 id");
+assert.equal(viewA.loadoutId, sessionSetA.loadout.id, "GET 形状：原样回传会话覆盖值");
+assert.equal(viewA.effective.source, "session", "会话覆盖优先于 scope 默认");
+assert.equal(viewA.effective.loadout.id, sessionSetA.loadout.id);
+assert.deepEqual(viewA.effective.skills, ["codex-skill"], "生效技能清单只含会话编组里可加载的成员");
+
+// 别的会话不受影响，回落到 scope 的 activeLoadout。
+const viewB = await sessionLoadoutView(sessionB);
+assert.equal(viewB.loadoutId, null, "未选的会话没有覆盖值");
+assert.equal(viewB.effective.source, "scope");
+assert.deepEqual(viewB.effective.skills, ["alpha"], "未选的会话用 scope 编组的成员");
+
+// 会话覆盖落到 state()（请求头会话）与 provider 候选。
+assert.equal(await sessionEnabled(sessionA, "dsh", "alpha"), false, "会话甲：scope 成员被会话编组挤掉");
+assert.equal(await sessionEnabled(sessionA, "codex", "codex-skill"), true, "会话甲：会话成员加载");
+assert.equal(await sessionEnabled(sessionB, "dsh", "alpha"), true, "会话乙回落 scope 默认");
+assert.equal(await sessionEnabled(sessionB, "codex", "codex-skill"), false, "会话乙：会话甲的成员不加载");
+const candidatesA = await listProviderCandidates({ sessionId: sessionA });
+assert.equal(candidatesA.find((item) => item.name === "codex-skill").invocation.modelInvocable, true, "会话成员照常发布候选");
+assert.equal(candidatesA.find((item) => item.name === "codex-other").invocation.modelInvocable, false, "会话外的外部技能被阻断覆盖层遮住");
+const candidatesB = await listProviderCandidates({ sessionId: sessionB });
+assert.equal(candidatesB.find((item) => item.name === "codex-skill").invocation.modelInvocable, false, "同一个外部技能在别的会话里不是成员，被阻断覆盖层遮住");
+
+// 显式「不加载」：覆盖 scope，但不改动 scope 的 activeLoadout。
+const none = await setSessionLoadout(sessionA, "");
+assert.equal(none.loadoutId, "");
+const viewNone = await sessionLoadoutView(sessionA);
+assert.equal(viewNone.loadoutId, "");
+assert.equal(viewNone.effective.source, "none");
+assert.equal(viewNone.effective.loadout, null);
+assert.deepEqual(viewNone.effective.skills, []);
+assert.equal(await sessionEnabled(sessionA, "dsh", "alpha"), false, "显式不加载：连 scope 成员也不加载");
+assert.equal(await sessionEnabled(sessionA, "codex", "codex-skill"), false);
+assert.equal(await sessionEnabled(sessionB, "dsh", "alpha"), true, "显式不加载不影响别的会话");
+assert.equal(await currentLoadout("user"), scopeDefault.loadout.id, "显式不加载不改 scope 的 activeLoadout");
+assert.equal((await readManagerState()).state.sessionLoadouts[sessionA], "", "显式不加载落盘为空字符串");
+
+// 清除覆盖（null）→ 回落到 scope。
+const cleared = await setSessionLoadout(sessionA, null);
+assert.equal(cleared.loadoutId, null);
+assert.equal((await readManagerState()).state.sessionLoadouts[sessionA], undefined, "清除覆盖从状态里删掉该键");
+const viewCleared = await sessionLoadoutView(sessionA);
+assert.equal(viewCleared.loadoutId, null);
+assert.equal(viewCleared.effective.source, "scope");
+assert.deepEqual(viewCleared.effective.skills, ["alpha"]);
+
+// 非法输入：写侧拒绝，读侧视为未选。
+assert.equal((await setSessionLoadout("bad session!", sessionSetA.loadout.id)).code, "error.session.invalid", "非法会话 id 拒绝写入");
+assert.equal((await setSessionLoadout("", sessionSetA.loadout.id)).code, "error.session.invalid", "空会话 id 拒绝写入");
+assert.equal((await setSessionLoadout(sessionA, "missing00")).code, "error.loadout.notFound", "不存在的编组拒绝写入");
+assert.equal((await readManagerState()).state.sessionLoadouts[sessionA], undefined, "失败的写入不落盘");
+const viewInvalid = await sessionLoadoutView("bad session!");
+assert.equal(viewInvalid.sessionId, null, "非法会话 id 读取为 null");
+assert.equal(viewInvalid.loadoutId, null);
+assert.equal(viewInvalid.effective.source, "scope", "非法会话 id 视为未选，回落 scope");
+
+// 删除编组清理指向它的会话覆盖，不留下悬空引用。
+await setSessionLoadout(sessionB, sessionSetA.loadout.id);
+assert.equal((await readManagerState()).state.sessionLoadouts[sessionB], sessionSetA.loadout.id);
+await deleteLoadout(sessionSetA.loadout.id);
+assert.equal((await readManagerState()).state.sessionLoadouts[sessionB], undefined, "删除编组清掉指向它的会话覆盖");
+assert.equal((await sessionLoadoutView(sessionB)).effective.source, "scope", "覆盖悬空时回落 scope");
+await deleteLoadout(sessionSetB.loadout.id);
+assert.equal((await deleteLoadout(scopeDefault.loadout.id)).ok, undefined);
+assert.equal((await sessionLoadoutView(sessionB)).effective.source, "none", "没有任何编组时不加载");
+
 // ── effectiveSkillPolicy 判定顺序（假数据驱动，逐条对应契约 v2）────────────────
 const fakeEntry = (name, extra = {}) => ({
   name, declaredName: name, description: "", modelInvocable: true, userInvocable: true,
@@ -409,6 +497,73 @@ assert.equal(effectiveSkillPolicy(fakePolicy(fakeState({ sources: { dsh: false, 
 assert.equal(resolveActiveLoadout(fakeState(), "user").id, "loadout1");
 assert.equal(resolveActiveLoadout(fakeState(), "project:0123456789abcdef"), null);
 assert.equal(resolveActiveLoadout(fakeState({ activeLoadout: { user: "missing00" } }), "user"), null, "悬空 id 解析为 null");
+
+// ── 会话级判定（v3，假数据驱动）：覆盖优先、显式不加载、非法/悬空回落 ───────────
+const fakeSession = "session-11111111-1111-4111-8111-111111111111";
+const fakeSessionState = (over = {}) => fakeState({
+  loadouts: [
+    { id: "loadout1", name: "L1", note: null, members: [{ root: "dsh", name: "member" }] },
+    { id: "loadout2", name: "L2", note: null, members: [{ root: "dsh", name: "other" }] },
+  ],
+  activeLoadout: { user: "loadout1" },
+  ...over,
+});
+const sessionPolicy = (policyState, name, sessionId = fakeSession, scopeKey = "user") => effectiveSkillPolicy(fakePolicy(policyState), fakeRoot, fakeEntry(name), scopeKey, sessionId);
+// 会话覆盖命中：成员换成 loadout2 的 other。
+assert.equal(sessionPolicy(fakeSessionState({ sessionLoadouts: { [fakeSession]: "loadout2" } }), "other").enabled, true, "会话覆盖：会话编组成员启用");
+assert.equal(sessionPolicy(fakeSessionState({ sessionLoadouts: { [fakeSession]: "loadout2" } }), "member").enabled, false, "会话覆盖：scope 成员不再启用");
+// 未选 / 非法 / 悬空 → 回落 scope。
+assert.equal(sessionPolicy(fakeSessionState({ sessionLoadouts: { [fakeSession]: "loadout2" } }), "member", "session-other").enabled, true, "别的会话回落 scope");
+assert.equal(sessionPolicy(fakeSessionState(), "member", fakeSession).enabled, true, "没有覆盖时用 scope");
+assert.equal(sessionPolicy(fakeSessionState({ sessionLoadouts: { [fakeSession]: "loadout2" } }), "member", "bad session!").enabled, true, "非法会话 id 视为未选");
+assert.equal(sessionPolicy(fakeSessionState({ sessionLoadouts: { [fakeSession]: "missing00" } }), "member").enabled, true, "悬空编组视为未选");
+// 显式不加载：连 scope 成员也不加载。
+const nonePolicy = sessionPolicy(fakeSessionState({ sessionLoadouts: { [fakeSession]: "" } }), "member");
+assert.equal(nonePolicy.enabled, false, "显式不加载：什么都不加载");
+assert.equal(nonePolicy.gated, true, "显式不加载表现为未加载（gated）而非手动排除");
+// 手动排除/引用优先于会话覆盖。
+assert.equal(sessionPolicy(fakeSessionState({ sessionLoadouts: { [fakeSession]: "loadout2" }, disabledSkills: { dsh: ["other"], codex: [] } }), "other").enabled, false, "手动排除优先于会话成员资格");
+assert.equal(sessionPolicy(fakeSessionState({ sessionLoadouts: { [fakeSession]: "" }, enabledSkills: { dsh: ["member"], codex: [] } }), "member").enabled, true, "手动引用优先于显式不加载");
+// 守门人关：会话覆盖完全不参与判定。
+assert.equal(sessionPolicy(fakeSessionState({ gatekeeper: false, sessionLoadouts: { [fakeSession]: "" } }), "member").enabled, true, "守门人关闭后回到 v1 行为");
+// resolveEffectiveLoadout / storedSessionLoadout 的三种来源与原始覆盖值。
+assert.deepEqual(
+  [
+    resolveEffectiveLoadout(fakeSessionState({ sessionLoadouts: { [fakeSession]: "loadout2" } }), "user", fakeSession).source,
+    resolveEffectiveLoadout(fakeSessionState(), "user", fakeSession).source,
+    resolveEffectiveLoadout(fakeSessionState({ activeLoadout: {} }), "user", fakeSession).source,
+    resolveEffectiveLoadout(fakeSessionState({ sessionLoadouts: { [fakeSession]: "" } }), "user", fakeSession).source,
+  ],
+  ["session", "scope", "none", "none"],
+  "生效顺序：session → scope → 空",
+);
+assert.equal(resolveEffectiveLoadout(fakeSessionState({ sessionLoadouts: { [fakeSession]: "" } }), "user", fakeSession).explicitNone, true);
+assert.equal(storedSessionLoadout(fakeSessionState({ sessionLoadouts: { [fakeSession]: "" } }), fakeSession), "", "原始覆盖值保留显式空串");
+assert.equal(storedSessionLoadout(fakeSessionState(), fakeSession), undefined, "没有覆盖时返回 undefined");
+assert.equal(storedSessionLoadout(fakeSessionState({ sessionLoadouts: {} }), "bad session!"), undefined, "非法会话 id 不读覆盖");
+
+// ── 会话段坏数据：形状合法但内容悬空 → 逐项丢弃；整段形状非法 → 丢段记 warning ──
+const sessionStateFile = managerStatePath();
+const sessionRaw = JSON.parse(await readFile(sessionStateFile, "utf8"));
+const keptSession = "session-cccccccc-3333-4333-8333-cccccccccccc";
+await setSessionLoadout(keptSession, "");
+sessionRaw.sessionLoadouts = { "bad session!": "abcdefgh", [keptSession]: "missing00", "": "abcdefgh" };
+await writeFile(sessionStateFile, `${JSON.stringify(sessionRaw, null, 2)}\n`, "utf8");
+const tolerantState = await readManagerState();
+assert.equal(tolerantState.writable, true);
+assert.equal(tolerantState.warning, null, "形状合法的会话段不记 warning（悬空项按未选处理）");
+assert.deepEqual([...Object.keys(tolerantState.state.sessionLoadouts)], [], "非法会话键与悬空编组逐项丢弃");
+assert.ok(tolerantState.state.loadouts.some((item) => item.name === "重建"), "会话段清洗不影响 loadouts 段");
+
+await setSessionLoadout(keptSession, "");
+const brokenRaw = JSON.parse(await readFile(sessionStateFile, "utf8"));
+brokenRaw.sessionLoadouts = "not-an-object";
+await writeFile(sessionStateFile, `${JSON.stringify(brokenRaw, null, 2)}\n`, "utf8");
+const brokenState = await readManagerState();
+assert.equal(brokenState.writable, true, "坏会话段不把状态打入只读");
+assert.equal(brokenState.warning && brokenState.warning.code, "warning.loadout.invalid", "坏会话段与 loadout 段共用 warning");
+assert.deepEqual([...Object.keys(brokenState.state.sessionLoadouts)], [], "坏会话段整段丢弃");
+assert.equal(await getGatekeeper(), true, "其他策略字段不受影响");
 
 await rm(temporary, { recursive: true, force: true });
 console.log("loadout ok");

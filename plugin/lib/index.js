@@ -19,6 +19,8 @@ import {
   setLoadoutEnabled,
   applyLoadout,
   listLoadouts,
+  setSessionLoadout,
+  sessionLoadoutView,
   importSkill,
   importUploadedSkill,
   browseDirectories,
@@ -202,7 +204,7 @@ function activeSessionCwds(ctx, sessionId) {
   const cwd = session?.header?.cwd;
   return typeof cwd === "string" && cwd.trim() ? [cwd.trim()] : [];
 }
-function externalSkillProvider(control, invalidators) {
+function externalSkillProvider(control, invalidators, sessionId) {
   invalidators.add(control.invalidate);
   if (control.signal && typeof control.signal.addEventListener === "function") {
     control.signal.addEventListener("abort", () => {
@@ -211,7 +213,7 @@ function externalSkillProvider(control, invalidators) {
   }
   return {
     name: "dsh-loadout-external",
-    list: async (options) => listProviderCandidates(options),
+    list: async (options) => listProviderCandidates(sessionId ? { ...options || {}, sessionId } : options),
     get: async (candidate, options) => getProviderSkill(candidate, options)
   };
 }
@@ -224,7 +226,7 @@ function registerAgentSkillProviders(ctx, invalidators) {
     const agentCtx = agent.ctx;
     const skills = agentCtx && typeof agentCtx.get === "function" ? agentCtx.get("skills") : agentCtx && agentCtx.skills;
     if (!skills || typeof skills.registerProvider !== "function") return;
-    const dispose = skills.registerProvider((control) => externalSkillProvider(control, invalidators));
+    const dispose = skills.registerProvider((control) => externalSkillProvider(control, invalidators, agent.id));
     registrations.set(agent.id, dispose);
   };
   const uninstall = (agent) => {
@@ -313,6 +315,14 @@ function apply(ctx, config) {
   }
   const API_PREFIX = "/api/vlln/dsh-loadout";
   const projectOptions = (sessionId) => ({ projectCwds: activeSessionCwds(ctx, sessionId ?? void 0) });
+  const requestSessionId = (req) => {
+    const value = req.headers.get("x-dsh-skills-session");
+    return typeof value === "string" && value.trim() ? value.trim() : void 0;
+  };
+  const sessionOptions = (sessionId) => ({
+    ...projectOptions(sessionId),
+    ...sessionId ? { sessionId } : {}
+  });
   const workspaceTarget = async (body) => {
     if (body.workspace === void 0) return null;
     return resolveWorkspaceTarget(body.workspace, registeredWorkspacePaths(ctx));
@@ -338,7 +348,7 @@ function apply(ctx, config) {
     }
     return snapshot;
   };
-  const stateWithSources = async (req) => attachSources(await state(projectOptions(req.headers.get("x-dsh-skills-session"))));
+  const stateWithSources = async (req) => attachSources(await state(sessionOptions(requestSessionId(req))));
   const handlePost = async (req, action, options) => {
     const mutationError = validateMutationRequest(req);
     if (mutationError) {
@@ -687,6 +697,30 @@ function apply(ctx, config) {
       path: `${API_PREFIX}/loadout-apply`,
       methods: ["POST"],
       fetch: (req) => handlePost(req, (b, scope) => applyLoadout(String(b.id || ""), { exclusive: b.exclusive === true }, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite })
+    },
+    {
+      // 会话级编组覆盖：composer 控件读写它。会话覆盖会改变该会话生效的技能集，
+      // 写后必须失效 provider 与斜杠菜单缓存。
+      path: `${API_PREFIX}/session-loadout`,
+      methods: ["GET", "HEAD", "POST"],
+      fetch: (req) => {
+        if (req.method === "GET" || req.method === "HEAD") {
+          const requested = new URL(req.url).searchParams.get("sessionId") || requestSessionId(req) || null;
+          return runFetch(() => sessionLoadoutView(requested, sessionOptions(requested)), void 0, req.method === "HEAD");
+        }
+        return handlePost(req, async (b) => {
+          const bodySession = b.sessionId;
+          if (bodySession !== void 0 && bodySession !== null && typeof bodySession !== "string") {
+            throw Object.assign(new Error("sessionId \u5FC5\u987B\u662F\u5B57\u7B26\u4E32"), { statusCode: 400, code: "error.session.invalid" });
+          }
+          const sessionId = typeof bodySession === "string" && bodySession.trim() ? bodySession.trim() : requestSessionId(req) || "";
+          if (b.loadoutId !== void 0 && b.loadoutId !== null && typeof b.loadoutId !== "string") {
+            throw Object.assign(new Error("loadoutId \u5FC5\u987B\u662F\u5B57\u7B26\u4E32\u6216 null"), { statusCode: 400, code: "error.proto.invalidParams" });
+          }
+          const loadoutId = b.loadoutId === void 0 || b.loadoutId === null ? null : String(b.loadoutId);
+          return setSessionLoadout(sessionId, loadoutId, log);
+        }, { afterSuccess: afterWrite });
+      }
     },
     {
       path: `${API_PREFIX}/delete`,

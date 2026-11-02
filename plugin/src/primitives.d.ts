@@ -76,6 +76,21 @@ declare module '@deepseek-ai/dsh-client-ui-primitives' {
     className?: string | undefined
   }): ReactElement
 
+  export type TagTone =
+    | 'outline'
+    | 'solid'
+    | 'neutral'
+    | 'quiet'
+    | 'success'
+    | 'info'
+    | 'warning'
+    | 'danger'
+  export function Tag(props: {
+    tone?: TagTone
+    className?: string | undefined
+    children?: ReactNode
+  }): ReactElement
+
   export function Modal(props: {
     open?: boolean
     onClose?: () => void
