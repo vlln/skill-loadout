@@ -121,16 +121,16 @@ try {
   assert.equal(calls.filter((call) => call.url.endsWith("/category-move")).at(-1).body.category, "", "没有分类时也可排序未分类技能");
   assert.equal(nodes(codex).some((node) => node.props.className === "dssm-cat"), false, "没建分类时不套分类层");
   assert.ok(rows().includes("codex-one"), "没建分类时技能仍平铺");
-  assert.ok(nodes(codex).some((node) => String(node.props["aria-label"] || "").includes(t("source.toggle"))), "已有来源开关的来源仍用那颗开关");
-  assert.equal(nodes(dsh).some((node) => String(node.props["aria-label"] || "").includes(t("source.toggle"))), true, "DSH 打开来源级总开关");
+  assert.ok(nodes(codex).some((node) => String(node.props.label || "").includes(t("source.toggle"))), "已有来源开关的来源仍用那颗开关");
+  assert.equal(nodes(dsh).some((node) => String(node.props.label || "").includes(t("source.toggle"))), true, "DSH 打开来源级总开关");
   assert.equal(nodes(dsh).some((node) => node.children.includes(t("category.enableAll")) || node.children.includes(t("category.disableAll"))), false, "DSH 不再用全部开启和全部关闭");
   assert.ok(nodes(dsh).some((node) => node.props.className === "dssm-skill-row"), "技能行有独立容器");
   assert.ok(nodes(dsh).some((node) => node.props.className === "dssm-cat" && node.props["aria-label"] === "工作"), "分类嵌在来源里");
   const work = nodes(dsh).find((node) => node.props.className === "dssm-cat" && node.props["aria-label"] === "工作");
   assert.deepEqual(nodes(work).filter((node) => node.props.className === "dssm-name").map((node) => node.children[0]), ["kept", "other"], "只列出归入该分类的技能");
-  const workSwitch = nodes(work).find((node) => node.props["aria-label"] === t("category.toggle") + " 工作");
-  assert.equal(workSwitch.props["aria-checked"], false, "没有全部开启时分类开关显示关");
-  assert.equal(workSwitch.props.role, "switch", "分类启停用 switch 角色");
+  const workSwitch = nodes(work).find((node) => node.props.label === t("category.toggle") + " 工作");
+  assert.equal(workSwitch.props.checked, false, "没有全部开启时分类开关显示关");
+  assert.equal(typeof workSwitch.props.onChange, "function", "分类启停走宿主 Switch 的 onChange 契约");
   assert.ok(textOf(work).includes(t("category.progress", { count: 2, enabled: 1, usable: 2 })), "部分开启写在数量里");
   const loose = nodes(dsh).find((node) => node.props.className === "dssm-cat" && node.props["aria-label"] === t("category.uncategorized"));
   assert.deepEqual(nodes(loose).filter((node) => node.props.className === "dssm-name").map((node) => node.children[0]), ["loose"]);
@@ -237,11 +237,11 @@ try {
   assert.equal(noteCall.body.name, "loose");
   assert.equal(noteCall.body.note, "我的自定义中文备注");
 
-  const keptToggle = nodes(work).find((node) => node.props["aria-label"] === t("skill.toggle") + " kept");
-  assert.equal(keptToggle.props.role, "switch", "技能启停使用 switch 角色");
-  assert.equal(keptToggle.props["aria-checked"], true, "已启用的技能开关 aria 状态为 true");
+  const keptToggle = nodes(work).find((node) => node.props.label === t("skill.toggle") + " kept");
+  assert.equal(typeof keptToggle.props.onChange, "function", "技能启停走宿主 Switch 的 onChange 契约");
+  assert.equal(keptToggle.props.checked, true, "已启用的技能开关 aria 状态为 true");
   const css = nodes().filter((node) => node.type === "style").map((node) => node.children.join("")).join("");
-  assert.match(css, /\.dssm-enable-switch\[aria-checked=true\]\{background:var\(--dsw-alias-brand-primary/, "开启使用宿主品牌色");
+  assert.ok(!css.includes(".dssm-enable-switch"), "开关不再使用自绘样式（宿主 Switch 接管）");
   assert.match(css, /\.dssm-skill-row\{[^}]*padding:11px 13px/, "技能行留白对齐仓库行");
   assert.match(css, /\.dssm-skill-desc\{[^}]*--dsw-alias-label-tertiary/, "描述用次级文字色");
   assert.match(css, /\.dssm-icon-action\{[^}]*background:transparent[^}]*border-color:var\(--dsw-alias-border-l2/, "行内描边使用宿主主题令牌和透明底色");
@@ -259,7 +259,7 @@ try {
   assert.ok(projectSource, "找到项目来源卡片");
   assert.equal(projectSource.props.className, "dssm-source", "项目来源仍是来源卡片");
   assert.ok(nodes(projectSource).some((node) => node.props.className === "dssm-cat" && node.props["aria-label"] === "项目工作"), "项目来源内部再套分类");
-  nodes(projectSource).find((node) => node.props["aria-label"] === t("category.toggle") + " 项目工作").props.onClick();
+  nodes(projectSource).find((node) => node.props.label === t("category.toggle") + " 项目工作").props.onChange(true);
   await tick(); await tick(); render();
   const projectToggle = calls.filter((call) => call.url.endsWith("/category-disable")).at(-1);
   assert.equal(projectToggle.body.root, "project-dsh:a");
@@ -305,7 +305,7 @@ try {
   render();
   const searched = nodes(sources().find((node) => textOf(node).includes("kept"))).find((node) => node.props.className === "dssm-cat" && node.props["aria-label"] === "工作");
   assert.deepEqual(nodes(searched).filter((node) => node.props.className === "dssm-name").map((node) => node.children[0]), ["kept"], "搜索只显示匹配技能");
-  assert.equal(nodes(searched).find((node) => node.props["aria-label"] === t("category.toggle") + " 工作").props["aria-checked"], false, "搜索不能把分类开关显示成整组已开启");
+  assert.equal(nodes(searched).find((node) => node.props.label === t("category.toggle") + " 工作").props.checked, false, "搜索不能把分类开关显示成整组已开启");
   assert.ok(textOf(searched).includes(t("category.progress", { count: 2, enabled: 1, usable: 2 })), "分类数量仍按整组计算");
 
   console.log("categories ui ok");

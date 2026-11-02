@@ -220,15 +220,15 @@ try {
   assert.ok(rows().includes("alpha-one"), "错误后刷新可恢复");
 
   // 6. 启停带 workspace，只改所选工作区的副本；完成后只刷新这个工作区。
-  const sw = find((node) => node.props["aria-label"] === t("skill.toggle") + " alpha-one");
-  sw.props.onClick(); await tick(); await tick(); render();
+  const sw = find((node) => node.props.label === t("skill.toggle") + " alpha-one");
+  sw.props.onChange(true); await tick(); await tick(); render();
   const toggle = calls.filter((c) => c.method === "POST" && c.url.endsWith("/disable")).at(-1);
   assert.deepEqual(toggle.body, { root: "project-dsh:a", name: "alpha-one", workspace: "D:/work/alpha/packages/web" }, "启停请求带所选工作区的登记路径");
   assert.ok(calls.filter((c) => c.url.endsWith("/workspace-skills")).length >= 2, "操作后重新读取该工作区");
 
   // 7. 来源总开关同样带 workspace。
-  const sourceSwitch = find((node) => String(node.props["aria-label"] || "").includes(t("source.toggle")));
-  sourceSwitch.props.onClick(); await tick(); await tick(); render();
+  const sourceSwitch = find((node) => String(node.props.label || "").includes(t("source.toggle")));
+  sourceSwitch.props.onChange(true); await tick(); await tick(); render();
   const sourceCall = calls.filter((c) => c.method === "POST" && /\/source-(en|dis)able$/.test(c.url)).at(-1);
   assert.equal(sourceCall.body.workspace, "D:/work/alpha/packages/web");
   assert.equal(sourceCall.body.root, "project-claude:a");
@@ -237,7 +237,7 @@ try {
   const alphaClaude = details["D:/work/alpha"].roots.find((r) => r.kind === "project-claude").skills[0];
   alphaClaude.shadowedBy = { root: "project-dsh:a", name: "alpha-two" };
   await settle();
-  const shadowedSwitch = find((node) => node.props["aria-label"] === t("skill.toggle") + " alpha-two");
+  const shadowedSwitch = find((node) => node.props.label === t("skill.toggle") + " alpha-two");
   assert.equal(shadowedSwitch.props.disabled, false, "被覆盖副本仍允许独立设置启停");
   delete alphaClaude.shadowedBy;
   alphaClaude.enabled = false;
@@ -249,10 +249,10 @@ try {
   const fallbackNote = find((node) => node.props.className === "dssm-note dssm-fallback");
   assert.ok(fallbackNote, "项目停用行显示接管来源");
   assert.ok(String(fallbackNote.children[0]).startsWith("当前使用全局 ") && String(fallbackNote.children[0]).endsWith(" 副本。"), "文案来自翻译，指向用户级来源");
-  assert.equal(find((node) => node.props["aria-label"] === t("skill.toggle") + " alpha-two").props["aria-checked"], false, "提示不改变副本的停用状态");
+  assert.equal(find((node) => node.props.label === t("skill.toggle") + " alpha-two").props.checked, false, "提示不改变副本的停用状态");
 
   const feedback = () => find((node) => node.props.className === "dssm-feedback" && node.children.includes(t("result.updated")));
-  find((node) => node.props["aria-label"] === t("skill.toggle") + " alpha-one").props.onClick(); await tick(); await tick(); render();
+  find((node) => node.props.label === t("skill.toggle") + " alpha-one").props.onChange(true); await tick(); await tick(); render();
   assert.ok(feedback(), "操作结果显示在发起操作的页面");
   await tab("发现技能");
   assert.equal(feedback(), undefined, "仓库页不显示项目页的操作结果");

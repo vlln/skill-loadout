@@ -124,7 +124,7 @@ try {
   assert.deepEqual(rows(), ["global-one", "global-two"]);
   const states = nodes().filter((node) => node.props.className === "dssm-row-state");
   assert.equal(states.length, 2, "每条技能都有独立状态操作组");
-  assert.ok(nodes(states[0]).some((node) => String(node.props["aria-label"] || "").includes(t("skill.toggle"))), "开关和状态位于同一组");
+  assert.ok(nodes(states[0]).some((node) => String(node.props.label || "").includes(t("skill.toggle"))), "开关和状态位于同一组");
   const skillActions = nodes().filter((node) => node.props.className === "dssm-skill-actions");
   assert.equal(skillActions.length, 2, "每条技能的操作在同一组");
   assert.ok(skillActions.every((node) => node.children.at(-1)?.props?.className === "dssm-row-state"), "技能开关在行的最右边");
