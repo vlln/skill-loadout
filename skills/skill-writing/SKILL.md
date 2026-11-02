@@ -9,7 +9,7 @@ license: MIT
 metadata:
   face: quality
   author: vlln
-  version: "2.5.0"
+  version: "2.6.0"
 ---
 
 # 写一份 skill
@@ -55,7 +55,7 @@ metadata:
 
 **skill 仓库的 README 有两条专属判据：**
 
-- **技能表固定四列：skill 名、face、scope、简短介绍。** face 是它主要回答哪类问题（流程 / 质量 / 执行）；scope 是适用范围——"通用"，或限定到宿主 / 语言 / 生态（如"skit 用户""GitHub 与包页面"），一行提示，不是分类维度；简短介绍一句话说清它管什么。读者按任务挑 skill 时，face 与 scope 是第一眼的分组与排除依据。**一列全是"通用"时多半是没想清楚每份排除谁**——scope 的价值在排除。
+- **技能表固定四列：skill 名、face、domain、简短介绍。** face 是它主要回答哪类问题（流程 / 质量 / 执行）；domain 是**最接近这个任务的一个领域**（软件开发、skills、文档、数据……）——按任务的域判，不按对象的域（给软件仓库写 README 的 skill，domain 是"文档"，不是"软件开发"）；同一仓库内同一领域逐字一致，别发明同义词。一列恒定是正常形态：domain 的价值在跨仓库归堆，不在表内区分。两列分工说死：face 管"哪类问题"，domain 管"哪个领域"，不混用。
 - **安装方式至少给两种，覆盖三类读者**：本仓库的推荐工具（如 skit）；生态通用 CLI——`npx skills add <owner>/<repo> --skill <名>`（需 Node.js ≥ 22.20；脚本化时加 `--agent <名> -y` 跳过交互，核对 2026-11-02）；以及一段可直接发给 agent 的 prompt（让 agent 运行 `npx skills use <owner>/<repo>@<名>` 并照生成的指令执行），什么都没装的读者走这条路。
 
 **独立**

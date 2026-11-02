@@ -32,13 +32,13 @@
 
 五份 skill，覆盖三个面：
 
-| skill | face | scope | 介绍 |
+| skill | face | domain | 介绍 |
 |---|---|---|---|
-| [skill-atlas](skills/skill-atlas/SKILL.md) | `quality` | 通用 | 定位、判重叠、拆分、配组 |
-| [skill-writing](skills/skill-writing/SKILL.md) | `quality` | 通用 | 一份 skill 的合格线与写法 |
-| [skill-making](skills/skill-making/SKILL.md) | `process` | 通用 | 做一份或一组 skill 的流程与关口 |
-| [skit](skills/skit/SKILL.md) | `execution` | skit 用户 | 安装、检查、导出与验收 |
-| [improvement-loop](skills/improvement-loop/SKILL.md) | `process` | 通用 | 多轮改进怎么证明 |
+| [skill-atlas](skills/skill-atlas/SKILL.md) | `quality` | skills | 定位、判重叠、拆分、配组 |
+| [skill-writing](skills/skill-writing/SKILL.md) | `quality` | skills | 一份 skill 的合格线与写法 |
+| [skill-making](skills/skill-making/SKILL.md) | `process` | skills | 做一份或一组 skill 的流程与关口 |
+| [skit](skills/skit/SKILL.md) | `execution` | skills | 安装、检查、导出与验收 |
+| [improvement-loop](skills/improvement-loop/SKILL.md) | `process` | skills | 多轮改进怎么证明 |
 
 `skill-atlas` 定位，`skill-writing` 给合格线，`skill-making` 管步骤与关口，`skit` 管动作，`improvement-loop` 管多轮改进怎么证明。
 
