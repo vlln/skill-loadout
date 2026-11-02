@@ -4,7 +4,7 @@
 
 <h1 align="center">skill-loadout</h1>
 
-<p align="center"><b>帮你把一堆 skill 整理成：一次任务真正要用的那一组。</b></p>
+<p align="center"><b>帮你把一堆 skill 整理成一次任务用得上的一组。</b></p>
 
 <p align="center">
   <a href="#它给你什么">它给你什么</a> ·
@@ -18,44 +18,44 @@
 
 <br>
 
-## 先说个你大概遇到过的情况
+## 装了太多 skill 会怎样
 
-skill 越装越多，然后开始不对劲：
+用一段时间以后大概会碰到这些：
 
-- 每个会话都把**全部** skill 的描述塞进上下文，装的越多越吵；
-- 你其实说不清这个会话到底加载了哪几份、生效的是哪些；
-- 两份 skill 的触发描述互相重叠，命中谁靠运气；
-- 想换一套（比如从"写代码"切到"写文档"）只能挨个点开关。
+- 每个会话都要加载全部 skill 的描述，装得越多，上下文越挤
+- 说不清这个会话到底加载了哪几份
+- 两份 skill 的触发条件写得像，不知道该用哪个
+- 想换个用法（比如从写代码切到写文档），只能一个个点开关
 
-这通常不是哪份 skill 写得差，而是"一堆各自为战的 skill"这个形态到了数量上限。
+这多半不是哪份 skill 写得不好，而是装的东西多了以后没有人管。
 
 ## 它给你什么
 
-两条路，一条做 skill，一条用 skill。
+两块东西：五份 skill，和一个插件。
 
-**做**：五份 skill 帮你产出**符合 loadout 理念的 skill**——每份只回答一个问题、彼此独立不互相引用、描述写得能被正确触发、一组之间不抢同一段权威。
+**五份 skill 帮你写 skill。** 写出来的 skill 每份只管一件事，彼此不引用，描述写得能被正确触发，一组之间不会抢同一段指令。
 
 | skill | face | domain | 介绍 |
 |---|---|---|---|
-| [skill-atlas](skills/skill-atlas/SKILL.md) | `quality` | skills | 定位、判重叠、拆分、配组 |
-| [skill-writing](skills/skill-writing/SKILL.md) | `quality` | skills | 一份 skill 的合格线与写法 |
-| [skill-making](skills/skill-making/SKILL.md) | `process` | skills | 做一份或一组 skill 的流程与关口 |
-| [skit](skills/skit/SKILL.md) | `execution` | skills | 安装、检查、导出与验收 |
-| [improvement-loop](skills/improvement-loop/SKILL.md) | `process` | skills | 多轮改进怎么证明 |
+| [skill-atlas](skills/skill-atlas/SKILL.md) | `quality` | skills | 判断一份 skill 该管什么，两份是否重叠，要不要拆 |
+| [skill-writing](skills/skill-writing/SKILL.md) | `quality` | skills | 一份 skill 写成什么样算合格 |
+| [skill-making](skills/skill-making/SKILL.md) | `process` | skills | 从决定做到发布的流程和检查点 |
+| [skit](skills/skit/SKILL.md) | `execution` | skills | 安装、检查、导出、装上以后怎么验 |
+| [improvement-loop](skills/improvement-loop/SKILL.md) | `process` | skills | 改了好几版以后，怎么证明新版本更好 |
 
-典型用法：拿一堆材料要做 skill，先用 `skill-atlas` 判断每份该回答哪个问题、会不会和别的抢；用 `skill-writing` 写；`skill-making` 管从决定做到发布的流程；写完用 `skit` 装上验一遍；以后改版用 `improvement-loop` 证明改得更好了。
+一般用法：手上有一堆材料要做成 skill，先用 `skill-atlas` 看每份该管什么、会不会和别的重叠；用 `skill-writing` 写；用 `skill-making` 走流程；写完用 `skit` 装上验一遍；以后要改，用 `improvement-loop` 对比新旧版本。
 
-**用**：一个 dsh 插件把"一组 skill"变成可命名、可切换、可观察的编组。
+**一个插件帮你用 skill。** 装了以后不再默认加载全部，只加载你选中的那组。会话输入框上有个控件，随时能看到当前加载了哪些，也能换一组。
 
 ```sh
 dsh plugin --profile web add "https://github.com/vlln/skill-loadout.git#path:/plugin"
 ```
 
-装上之后默认不再全量加载：会话只加载你选的那组编组，聊天框上有一个控件随时能看当前加载了什么、换一组。详见 [plugin/README.md](plugin/README.md)。
+插件的细节在 [plugin/README.md](plugin/README.md)。
 
 ## 安装
 
-推荐 skit：
+用 skit：
 
 ```sh
 skit install vlln/skill-loadout/skills/skill-atlas vlln/skill-loadout/skills/skill-writing      # 定位与合格线
@@ -64,47 +64,47 @@ skit install vlln/skill-loadout/skills/skit                                    #
 skit check
 ```
 
-生态通用 CLI（需 Node.js ≥ 22.20）：
+也可以用 npx skills（需要 Node.js 22.20 以上）：
 
 ```sh
-npx skills add vlln/skill-loadout --skill skill-writing    # 例；换 --skill 装别的
+npx skills add vlln/skill-loadout --skill skill-writing    # 换成别的名字就装别的
 ```
 
-什么都没装时，把这段直接发给 agent，让它自己装自己用：
+什么都没装的话，把下面这段发给 agent，让它自己装：
 
 ```text
 Run `npx skills use "vlln/skill-loadout@skill-writing"` and follow the generated skill instructions now. Read its complete output, redirecting it to a temporary file first if necessary. Resolve relative paths from the supporting-files directory it provides.
 ```
 
-本地开发时克隆后用 `./skills/<名>` 直装。五份互不引用，装一份也能用。
+本地改的时候，克隆下来用 `./skills/<名>` 装。五份互不引用，单独装一份也能用。
 
-跑通的样子：`skit list` 里出现刚装的几份，且 `skit check` 没有指向它们的报错。
+装完 `skit list` 里能看到这几份，`skit check` 没有指向它们的报错，就算装好了。
 
 ## 为什么这样分
 
-回到开头那个混乱。我们的答案是把 skill 当成**插卡**：
+回到开头那些问题。我们的做法是把 skill 当成一张张独立的卡：
 
-- 每张卡只回答一个问题——否则两张卡会抢同一段指令；
-- 卡与卡彼此独立，不引用也不依赖顺序——否则换一张就得换全部；
-- 卡面写清什么时候插——没有操作员替你挑卡，`description` 是唯一的操作员。
+- 一张卡只管一件事，否则两张卡会抢同一段指令
+- 卡和卡之间不引用、不依赖顺序，否则换一张就得换全部
+- 卡面写清什么时候该用，因为没人替你挑卡，`description` 是唯一的依据
 
-按"它主要回答哪个问题"分，只有三个答案：**流程**（何时做、谁决定）、**质量**（凭什么算合格）、**执行**（具体怎么动手）。这就是每份 skill 的 `face`。
+按"这份 skill 回答什么问题"分，只有三种：流程（什么时候做什么、谁决定）、质量（什么样算合格）、执行（具体怎么做）。这就是表里的 face 一列。
 
-顺带两个直接后果：一个任务通常是**几份卡**而不是一份，这组卡就是 loadout；而一旦卡多到一定程度，"默认全加载"必然崩，所以需要一个按组控制的东西——就是上面那个插件。
+还有一个后果：一个任务通常要好几份卡，这一组就是 loadout。卡多到一定程度以后，默认全加载是不行的，所以需要按组控制，也就是上面那个插件。
 
-完整论证、证据强度与可被推翻的预测在 [THEORY.md](THEORY.md) 与 [docs/status.md](docs/status.md)；这个方法是实跑出来的，产品仓库 [sw-dev-loadout](https://github.com/vlln/sw-dev-loadout)（8 份 skill）是它的产出，也是它的实验样本。
+完整的论证、证据强度和可以被推翻的预测在 [THEORY.md](THEORY.md) 和 [docs/status.md](docs/status.md)。这套方法是做出来的，不是想出来的：[sw-dev-loadout](https://github.com/vlln/sw-dev-loadout)（8 份 skill）是它的产出，也是实验样本。
 
 ## 结构
 
 | 路径 | 是什么 |
 |---|---|
-| `THEORY.md` | 内容坐标：按"回答哪个问题"分三面 |
-| `skills/` | 五份 skill（见上表） |
-| `plugin/` | dsh-loadout 插件：按 loadout 启用、配置、管理一组 skill |
-| `docs/status.md` | 证据与限制：每条结论有多硬、哪些预测还没测过 |
-| `docs/method.md` | 从选题到 loadout 的制作方法 |
-| `docs/archive/` | 旧模型下的归位审计，留作坐标第一次被检验的记录 |
-| `AGENTS.md` | 本仓库的常驻约定 |
+| `THEORY.md` | 按"回答什么问题"把 skill 分成三个面 |
+| `skills/` | 五份 skill |
+| `plugin/` | dsh-loadout 插件：按编组启用、配置、管理 skill |
+| `docs/status.md` | 每条结论有多少证据，哪些预测还没测过 |
+| `docs/method.md` | 从选题到做出 loadout 的过程 |
+| `docs/archive/` | 早期模型下的归位审计，留作记录 |
+| `AGENTS.md` | 本仓库的约定 |
 
 ## 许可
 
