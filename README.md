@@ -83,6 +83,7 @@ Run `npx skills use "vlln/skill-loadout@skill-writing"` and follow the generated
 | `skills/skill-making/` | 制作流程 | 安装者 |
 | `skills/skit/` | 安装与验证命令 | 安装者 |
 | `skills/improvement-loop/` | 多轮改进与证明 | 安装者 |
+| `plugin/` | dsh-loadout 插件：以 loadout（一组 skill）为单位启用、配置、管理 | 使用者 |
 
 ## 为什么是这种形状
 

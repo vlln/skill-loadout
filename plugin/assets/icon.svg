@@ -1,29 +1,19 @@
 <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="dsh_svg_skill_book" x1="4" y1="10" x2="32" y2="30" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#7C3AED"/>
-      <stop offset="1" stop-color="#A855F7"/>
+    <linearGradient id="loadout_card" x1="10" y1="8" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4D6BFE"/>
+      <stop offset="1" stop-color="#7C9AFF"/>
     </linearGradient>
-    <linearGradient id="dsh_svg_skill_star" x1="14" y1="4" x2="22" y2="16" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FBBF24"/>
-      <stop offset="1" stop-color="#F59E0B"/>
+    <linearGradient id="loadout_slot" x1="8" y1="28" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4D6BFE"/>
+      <stop offset="1" stop-color="#B3C4FF"/>
     </linearGradient>
   </defs>
-  <!-- Open Skill Book (Left & Right Pages) -->
-  <!-- Left Page -->
-  <path d="M18 20C13 18.5 8 19 5 21V28.5C8 26.5 13 26 18 27.5V20Z" fill="url(#dsh_svg_skill_book)" stroke="#6D28D9" stroke-width="1.4" stroke-linejoin="round"/>
-  <!-- Right Page -->
-  <path d="M18 20C23 18.5 28 19 31 21V28.5C28 26.5 23 26 18 27.5V20Z" fill="url(#dsh_svg_skill_book)" stroke="#6D28D9" stroke-width="1.4" stroke-linejoin="round"/>
-  <!-- Book Spine / Middle Fold -->
-  <line x1="18" y1="20" x2="18" y2="28" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"/>
-
-  <!-- Code / Skill Glyphs on Book Pages -->
-  <line x1="8" y1="23.5" x2="14" y2="22.5" stroke="#DDD6FE" stroke-width="1.4" stroke-linecap="round"/>
-  <line x1="22" y1="22.5" x2="28" y2="23.5" stroke="#DDD6FE" stroke-width="1.4" stroke-linecap="round"/>
-
-  <!-- Ascending Radiant Skill Star (Talent / Power Mastery) -->
-  <path d="M18 5L19.8 10L25 11.8L19.8 13.6L18 19L16.2 13.6L11 11.8L16.2 10L18 5Z" fill="url(#dsh_svg_skill_star)" stroke="#FFFFFF" stroke-width="1.2"/>
-  <!-- Power Sparkles on Sides -->
-  <circle cx="8" cy="12" r="1.4" fill="#FBBF24"/>
-  <circle cx="28" cy="12" r="1.4" fill="#FBBF24"/>
+  <!-- 三张卡片扇开，最右一张正在入槽 -->
+  <rect x="8.5" y="10" width="11" height="15" rx="2.4" fill="white" fill-opacity="0.14" stroke="white" stroke-opacity="0.5" transform="rotate(-12 14 17.5)"/>
+  <rect x="12.5" y="8.6" width="11" height="15" rx="2.4" fill="white" fill-opacity="0.22" stroke="white" stroke-opacity="0.65"/>
+  <rect x="17" y="8" width="11" height="15" rx="2.4" fill="url(#loadout_card)" transform="rotate(10 22.5 15.5)"/>
+  <circle cx="22.6" cy="14.6" r="2.1" fill="white" fill-opacity="0.92" transform="rotate(10 22.5 15.5)"/>
+  <!-- 槽 -->
+  <rect x="8" y="27.4" width="20" height="2.6" rx="1.3" fill="url(#loadout_slot)"/>
 </svg>
