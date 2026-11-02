@@ -42,6 +42,16 @@
 
 `skill-atlas` 定位，`skill-writing` 给合格线，`skill-making` 管步骤与关口，`skit` 管动作，`improvement-loop` 管多轮改进怎么证明。
 
+## 插件：dsh-loadout
+
+loadout 这个概念落在 dsh 里的形态：侧栏插件，把"一组 skill"变成可命名、可整组启停、可排他应用的东西（启用这组、停用其余，换任务换一组）。基于 dsh-skills-manager 改造，装后发现、安装、更新、启停单个技能的能力也都在。
+
+```sh
+dsh plugin --profile web add "https://github.com/vlln/skill-loadout.git#path:/plugin"
+```
+
+详见 [plugin/README.md](plugin/README.md)。
+
 ## 安装
 
 推荐 skit：
