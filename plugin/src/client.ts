@@ -344,6 +344,31 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss } from "./sidebar-en
           const className = kind === "danger" ? "dssm-btn-danger" : undefined;
           return h(PrimitiveButton, { variant: variant, className: className, disabled: disabled, onClick: onClick }, label);
         }
+
+    // 插件内置图标：统一 16×16 网格、stroke 1.5、圆角端点；几何简化优先于细节，
+    // 14–16px 下不产生锯齿噪声（2026-11-02 重绘）。
+    var UI_ICONS: Record<string, string> = {
+      globe: "M8 2.25a5.75 5.75 0 1 0 0 11.5 5.75 5.75 0 0 0 0-11.5zM8 2.25c-2.25 2.1-2.25 9.4 0 11.5M8 2.25c2.25 2.1 2.25 9.4 0 11.5M2.45 8h11.1",
+      folder: "M2 5.4a1.4 1.4 0 0 1 1.4-1.4h2.3l1.25 1.35h5.65a1.4 1.4 0 0 1 1.4 1.4v5.5a1.4 1.4 0 0 1-1.4 1.4H3.4A1.4 1.4 0 0 1 2 12.25z",
+      compass: "M8 2.25a5.75 5.75 0 1 0 0 11.5 5.75 5.75 0 0 0 0-11.5zM10.35 5.65 9.1 9.1 5.65 10.35 6.9 6.9z",
+      layers: "M8 2.6 13.4 5.3 8 8 2.6 5.3zM2.6 8.1 8 10.8 13.4 8.1M2.6 10.9 8 13.6 13.4 10.9",
+      trash: "M3.4 4.9h9.2M6.3 4.9V3.3h3.4v1.6M4.8 4.9l.55 7.55a1.3 1.3 0 0 0 1.3 1.2h2.7a1.3 1.3 0 0 0 1.3-1.2L11.2 4.9",
+      refresh: "M13.35 8a5.35 5.35 0 1 1-1.57-3.78M10.2 3.5l3.61.72.72 3.61",
+      plus: "M8 3.2v9.6M3.2 8h9.6",
+      upload: "M8 10.8V3.4M5.2 6.2 8 3.4l2.8 2.8M3 11.2v1.3a1.1 1.1 0 0 0 1.1 1.1h7.8a1.1 1.1 0 0 0 1.1-1.1v-1.3",
+      pencil: "M4.1 11.9l.65-2.55 5.75-5.75a1.15 1.15 0 0 1 1.63 0l.37.37a1.15 1.15 0 0 1 0 1.63l-5.75 5.75zM9.5 4.6l1.9 1.9",
+      restore: "M3.4 6.6A4.8 4.8 0 1 1 4.9 11.7M3.4 2.9v3.7h3.7",
+      close: "M4.6 4.6l6.8 6.8M11.4 4.6l-6.8 6.8",
+      check: "M8 2.25a5.75 5.75 0 1 0 0 11.5 5.75 5.75 0 0 0 0-11.5zM5.6 8.15l1.7 1.7 3.2-3.5",
+      minus: "M8 2.25a5.75 5.75 0 1 0 0 11.5 5.75 5.75 0 0 0 0-11.5zM5.7 8h4.6",
+      warn: "M8 2.7 13.9 12.9H2.1zM8 6.5v3.3M8 11.9v.01",
+    };
+    function uiIcon(name: string, size?: number) {
+      var d = UI_ICONS[name];
+      var px = size || 16;
+      return h("svg", { viewBox: "0 0 16 16", width: px, height: px, "aria-hidden": true, focusable: "false" },
+        h("path", { d: d, fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" }));
+    }
     function strokeIcon(d: string) {
       return h("svg", { viewBox: "0 0 16 16", width: 16, height: 16, "aria-hidden": true, focusable: "false" }, h("path", { d: d, fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" }));
     }
@@ -840,10 +865,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss } from "./sidebar-en
                     isWarn ? "var(--dsw-alias-state-warn-primary, #d49245)" :
                     isError ? "var(--dsw-alias-state-error-primary, #ef7272)" :
                     "var(--dsw-alias-label-tertiary, #a0a0a0)";
-        var iconD = isSuccess ? "M8 0a8 8 0 100 16A8 8 0 008 0zm3.28 6.72l-4 4a.75.75 0 01-1.06 0l-2-2a.75.75 0 111.06-1.06L7 9.44l3.47-3.47a.75.75 0 011.06 1.06z" :
-                    isWarn ? "M8 0a8 8 0 100 16A8 8 0 008 0zm3 8.75H5a.75.75 0 010-1.5h6a.75.75 0 010 1.5z" :
-                    isError ? "M8.982 1.566a1.13 1.13 0 00-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 01-1.1 0L7.1 5.995A.905.905 0 018 5zm.002 6a1 1 0 110 2 1 1 0 010-2z" :
-                    "M8.28 1.34a.75.75 0 00-.56 0l-6.5 2.5a.75.75 0 000 1.41l6.5 2.5a.75.75 0 00.56 0l6.5-2.5a.75.75 0 000-1.41l-6.5-2.5zm5.97 6.41L8 10.15 1.75 7.75l-.5.19a.75.75 0 000 1.41l6.5 2.5a.75.75 0 00.56 0l6.5-2.5a.75.75 0 000-1.41l-.56-.2zM14.25 11.5L8 13.9 1.75 11.5l-.5.19a.75.75 0 000 1.41l6.5 2.5a.75.75 0 00.56 0l6.5-2.5a.75.75 0 000-1.41l-.56-.19z";
+        var iconName = isSuccess ? "check" : isWarn ? "minus" : isError ? "warn" : "layers";
         var tooltip = title || t(key);
         return h("span", {
           className: "dssm-status " + (cls || ""),
@@ -851,9 +873,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss } from "./sidebar-en
           "aria-label": tooltip,
           style: { display: "inline-flex", alignItems: "center", justifyContent: "center", color: color, width: 20, height: 20, verticalAlign: "middle" }
         },
-          h("svg", { viewBox: "0 0 16 16", width: 14, height: 14, fill: "currentColor", "aria-hidden": true },
-            h("path", { d: iconD })
-          )
+          uiIcon(iconName, 14)
         );
       }
       function renderSkill(root: RootView, skill: SkillView, workspacePath?: string) {
@@ -949,9 +969,9 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss } from "./sidebar-en
       function sourceExtra(root: RootView, workspacePath: string | undefined, displayName: string) {
         var scoped = workspacePath ? { root: root.key, workspace: workspacePath } : { root: root.key };
         var actions: React.ReactNode[] = [];
-        actions.push(iconButton(t("category.create"), strokeIcon("M8 2.5v11M2.5 8h11"), function () { setCategoryName(""); setModal({ type: "category-create", root: root.key, workspace: workspacePath }); }, false, busy));
+        actions.push(iconButton(t("category.create"), uiIcon("plus"), function () { setCategoryName(""); setModal({ type: "category-create", root: root.key, workspace: workspacePath }); }, false, busy));
         // 外部只读来源可以改读取位置；DSH / 公共 Agent 由宿主配置，不在这里开放。
-        if (!workspacePath && root.mutable !== true) actions.push(iconButton(t("rootPath.edit"), strokeIcon("M2.5 4.5h3l1.3 1.5h6.7v6h-11z"), function () { openRootPath(root); }, false, busy));
+        if (!workspacePath && root.mutable !== true) actions.push(iconButton(t("rootPath.edit"), uiIcon("folder"), function () { openRootPath(root); }, false, busy));
         if (canToggleSource(root)) actions.push(h(SkillSwitch, { on: root.enabled, disabled: busy, label: t("source.toggle") + " " + displayName, onClick: function () { post(root.enabled ? "/source-disable" : "/source-enable", scoped); } }));
         return h("span", { className: "dssm-source-actions", onClick: function (event: React.MouseEvent) { event.stopPropagation(); } }, actions);
       }
@@ -1018,7 +1038,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss } from "./sidebar-en
               h("span", { className: "dssm-cat-title" }, open ? h(AntdFolderOpen) : h(AntdFolderClosed), bucket.name),
               h("span", { className: "dssm-count" }, t("category.progress", { count: counted.length, enabled: enabledCount, usable: usable.length }))),
             h("span", { className: "dssm-source-actions", onClick: function (event: React.MouseEvent) { event.stopPropagation(); } },
-              bucket.locked ? null : iconButton(t("category.addSkills"), strokeIcon("M8 2.5v11M2.5 8h11"), function () {
+              bucket.locked ? null : iconButton(t("category.addSkills"), uiIcon("plus"), function () {
                 var catMap: Record<string, string> = {};
                 (root.categories || []).forEach(function (c) { catMap[c.id] = c.name; });
                 var sourceList = allRootRows || bucket.scope || bucket.skills;
@@ -1033,8 +1053,8 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss } from "./sidebar-en
                 setAddSelection({}); setAddSearch("");
                 setModal({ type: "category-add", root: root.key, id: bucket.id, name: bucket.name, workspace: workspacePath, skills: candidates });
               }, false, busy),
-              bucket.locked ? null : iconButton(t("category.rename"), strokeIcon("M9.2 2.8l4 4L6.2 13.8H2.2v-4z"), function () { setCategoryName(bucket.name); setModal({ type: "category-rename", root: root.key, id: bucket.id, name: bucket.name, workspace: workspacePath }); }, false, busy),
-              bucket.locked ? null : iconButton(t("category.delete"), strokeIcon("M3.5 4.5h9M6.5 4.5V3h3v1.5M5 4.5l.7 8.5h4.6L11 4.5"), function () { setModal({ type: "category-delete", root: root.key, id: bucket.id, name: bucket.name, workspace: workspacePath }); }, true, busy),
+              bucket.locked ? null : iconButton(t("category.rename"), uiIcon("pencil"), function () { setCategoryName(bucket.name); setModal({ type: "category-rename", root: root.key, id: bucket.id, name: bucket.name, workspace: workspacePath }); }, false, busy),
+              bucket.locked ? null : iconButton(t("category.delete"), uiIcon("trash"), function () { setModal({ type: "category-delete", root: root.key, id: bucket.id, name: bucket.name, workspace: workspacePath }); }, true, busy),
               enableSwitch(allOn, t("category.toggle") + " " + bucket.name, busy || root.enabled === false || usable.length === 0, function () {
                 post(allOn ? "/category-disable" : "/category-enable", scoped({ root: root.key, category: bucket.id }));
               }))),
@@ -1102,8 +1122,8 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss } from "./sidebar-en
                   h("time", { dateTime: item.deletedAt }, t("trash.deletedAt", { time: formatTrashTime(t, item.deletedAt) })),
                   h("span", { className: "dssm-trash-source" }, t("trash.source", { source: trashRootLabel(item) })))),
               h("div", { className: "dssm-trash-actions" },
-                iconButton(t("btn.restore"), strokeIcon("M3.5 6.5A4.5 4.5 0 1 1 5 11.5M3.5 3.5v3h3"), function () { post("/trash-restore", trashRestoreBody(item), "result.restored", { name: item.name }).catch(function () {}); }, false, busy),
-                iconButton(t("btn.delete.forever"), strokeIcon("M3.5 4.5h9M6.5 4.5V3h3v1.5M5 4.5l.7 8.5h4.6L11 4.5"), function () { setModal({ type: "delete-confirm", id: item.id, name: item.name }); }, true, busy)));
+                iconButton(t("btn.restore"), uiIcon("restore"), function () { post("/trash-restore", trashRestoreBody(item), "result.restored", { name: item.name }).catch(function () {}); }, false, busy),
+                iconButton(t("btn.delete.forever"), uiIcon("trash"), function () { setModal({ type: "delete-confirm", id: item.id, name: item.name }); }, true, busy)));
           }) : h("div", { className: "dssm-empty" }, t("trash.empty")));
       }
       function findSkillView(rootKey: string, name: string): SkillView | null {
@@ -1145,7 +1165,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss } from "./sidebar-en
               h("span", { className: "dssm-name" }, row.skill ? row.skill.declaredName || row.skill.name : row.member.name),
               row.missing ? h("span", { className: "dssm-loadout-tag dssm-loadout-tag-missing" }, t("loadout.missingTag")) : null,
               h("span", { className: "dssm-note" }, root ? rootDisplayName(t, root) : row.member.root),
-              iconButton(t("loadout.removeMember"), strokeIcon("m4 4 8 8M12 4 4 12"), function () {
+              iconButton(t("loadout.removeMember"), uiIcon("close"), function () {
                 post("/loadout-remove", { id: loadout.id, root: row.member.root, name: row.member.name }, "loadout.memberRemoved", { name: row.member.name }).then(function () { loadLoadouts(); }).catch(function () {});
               }, false, busy));
           }) : h("div", { className: "dssm-empty" }, t("loadout.emptyMembers")),
@@ -1208,14 +1228,11 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss } from "./sidebar-en
       }
       var repositoryUI = useRepositoryUI({ active: scope === "repositories", t: t, onInstalled: function () { return Promise.all([refresh(false), refreshWorkspaceDetails()]); } });
       function getTabIcon(tabVal: string) {
-        var d = tabVal === "user" ? "M8 0a8 8 0 100 16A8 8 0 008 0zm6.5 8a6.5 6.5 0 01-.65 2.82L10.3 8.35a.75.75 0 00-1.06 0L8.2 9.4V6.5a.75.75 0 00-.75-.75h-1V4.25a.75.75 0 00-.75-.75h-1a6.47 6.47 0 013.3-1.95v1.2a.75.75 0 00.75.75h1.5a.75.75 0 00.75-.75V2.3A6.52 6.52 0 0114.5 8z" :
-                tabVal === "project" ? "M1.75 2.5h3.44l1.5 1.5h7.56c.966 0 1.75.784 1.75 1.75v7.5a1.75 1.75 0 01-1.75 1.75H1.75A1.75 1.75 0 010 13.25V4.25C0 3.284.784 2.5 1.75 2.5z" :
-                tabVal === "repositories" ? "M8 0a8 8 0 100 16A8 8 0 008 0zm2.93 5.07l-1.5 4.5a.75.75 0 01-.43.43l-4.5 1.5a.375.375 0 01-.47-.47l1.5-4.5a.75.75 0 01.43-.43l4.5-1.5a.375.375 0 01.47.47z" :
-                tabVal === "loadouts" ? "M8.28 1.34a.75.75 0 00-.56 0l-6.5 2.5a.75.75 0 000 1.41l6.5 2.5a.75.75 0 00.56 0l6.5-2.5a.75.75 0 000-1.41l-6.5-2.5zm5.97 6.41L8 10.15 1.75 7.75l-.5.19a.75.75 0 000 1.41l6.5 2.5a.75.75 0 00.56 0l6.5-2.5a.75.75 0 000-1.41l-.56-.2zM14.25 11.5L8 13.9 1.75 11.5l-.5.19a.75.75 0 000 1.41l6.5 2.5a.75.75 0 00.56 0l6.5-2.5a.75.75 0 000-1.41l-.56-.19z" :
-                "M5.5 1.25h5c.4 0 .75.35.75.7V3h2.5c.5 0 .9.4.9.9s-.4.9-.9.9h-.35l-.65 8.1a1.6 1.6 0 0 1-1.6 1.5H4.85a1.6 1.6 0 0 1-1.6-1.5L2.6 4.8H2.25c-.5 0-.9-.4-.9-.9s.4-.9.9-.9H4.75V1.95c0-.4.35-.7.75-.7z";
-        return h("svg", { viewBox: "0 0 16 16", width: 14, height: 14, fill: "currentColor", "aria-hidden": true },
-          h("path", { d: d })
-        );
+        var name = tabVal === "user" ? "globe" :
+                   tabVal === "project" ? "folder" :
+                   tabVal === "repositories" ? "compass" :
+                   tabVal === "loadouts" ? "layers" : "trash";
+        return uiIcon(name, 14);
       }
       var tabItems = ["user", "project", "loadouts", "repositories", "trash"].map(function (value) {
         var text = value === "loadouts" ? t("loadout.tab") : t("scope." + value);
@@ -1231,10 +1248,10 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss } from "./sidebar-en
       var tabs = h(SegmentedTabs, { key: "tabs", className: "dssm-scope-tabs", label: t("scope.label"), value: scope, onChange: function (next: string) { setScope(next); if (next === "project" || next === "trash") loadWorkspaces(next === "project"); if (next === "trash") refresh(true); if (next === "loadouts") loadLoadouts(); }, items: tabItems });
       var skillControls = [ scope === "project" ? null : h("div", { key: "summary", className: "dssm-summary" }, (gatekeeperOn ? [["total", "summary.total"], ["enabled", "summary.enabled"], ["unloaded", "summary.unloaded"], ["disabled", "summary.disabled"], ["invalid", "summary.invalid"]] : [["total", "summary.total"], ["enabled", "summary.enabled"], ["disabled", "summary.disabled"], ["invalid", "summary.invalid"]]).map(function (item) { return h("div", { key: item[1], className: "dssm-stat" }, h("strong", null, summary[item[0]]), t(countKey(item[1], summary[item[0]]), { count: summary[item[0]] }).replace(String(summary[item[0]]), "")); })), h("div", { key: "filters", className: "dssm-filters" }, scope === "project" ? null : h("div", { className: "dssm-source-filter" }, h(SourceSelect, { value: activeSource, label: t("filter.source"), options: options, onChange: setSource })), h("div", { className: "dssm-status-filter" }, h(SourceSelect, { value: filters.status, label: t("filter.status"), options: [{ value: "", label: t("filter.statusAll") }].concat((gatekeeperOn ? ["enabled", "unloaded", "disabled", "shadowed", "invalid"] : ["enabled", "disabled", "shadowed", "invalid"]).map(function (value) { return { value: value, label: t("status." + value) }; })), onChange: function (value) { updateFilter("status", value); } })), scope === "project" ? h("div", { className: "dssm-project-filter" }, h(SourceSelect, { value: selectedWorkspace, label: t("filter.workspace"), disabled: workspaceList.loading || !workspaceRows.length, options: workspaceRows.map(function (row) { return { value: workspacePath(row), label: row.name + (!row.available ? " · " + (row.errorCode === "ENOENT" || row.errorCode === "ENOTDIR" ? t("workspace.missing") : (row.errorCode === "EACCES" || row.errorCode === "EPERM" ? t("workspace.unreadable") : t("workspace.unavailable"))) : "") + (workspaceRows.filter(function (other) { return other.name === row.name; }).length > 1 ? " · " + workspacePath(row) : ""), disabled: !row.available || !workspacePath(row) }; }), onChange: selectWorkspace })) : null, h(Input, { className: "dssm-search", allowClear: true, value: query, "aria-label": t("search"), placeholder: t("search.placeholder"), onChange: function (e) { setQuery(e.target.value); } }),
         scope !== "trash" ? h("div", { className: "dssm-filter-actions" },
-          filterActionButton(t("btn.refresh"), strokeIcon("M13.5 8A5.5 5.5 0 118 2.5c2.3 0 4.3 1.4 5.1 3.5m.4-3.5v3.5H10"), function () { refresh(false); if (scope === "project") refreshWorkspaceDetails(); }, busy || snapshot.loading),
-          filterActionButton(t("btn.create"), strokeIcon("M8 2.5v11M2.5 8h11"), openCreate, busy, t("btn.create") + "…"),
-          filterActionButton(t("import.global"), strokeIcon("M2.5 10.5v2a1 1 0 001 1h9a1 1 0 001-1v-2M8 2.5v7M5 5.5l3-3 3 3"), openImport, busy),
-          scope === "user" ? filterActionButton(t("rootPath.manage"), strokeIcon("M2.5 4.5h3l1.3 1.5h6.7v6h-11z"), openRootPathPicker, busy, t("rootPath.manage") + "…") : null
+          filterActionButton(t("btn.refresh"), uiIcon("refresh"), function () { refresh(false); if (scope === "project") refreshWorkspaceDetails(); }, busy || snapshot.loading),
+          filterActionButton(t("btn.create"), uiIcon("plus"), openCreate, busy, t("btn.create") + "…"),
+          filterActionButton(t("import.global"), uiIcon("upload"), openImport, busy),
+          scope === "user" ? filterActionButton(t("rootPath.manage"), uiIcon("folder"), openRootPathPicker, busy, t("rootPath.manage") + "…") : null
         ) : null)];
       var content: React.ReactNode[] = ([h("style", { key: "css" }, CSS), h("div", { key: "head", className: "dssm-head" }, h("div", { className: "dssm-title-block" }, h("div", { className: "dssm-title-row" }, h("h2", { className: "dssm-title" }, t("title")), h("div", { className: "dssm-feedback-links" }, h(PrimitiveButton, { variant: "outline", size: "sm", "aria-label": t("link.project"), icon: h(GithubMark16), onClick: function () { window.open("https://github.com/vlln/skill-loadout", "_blank", "noreferrer"); } }, t("link.project")), h(PrimitiveButton, { variant: "outline", size: "sm", "aria-label": t("link.feedback"), icon: h(FeedbackIcon), onClick: function () { window.open("https://github.com/vlln/skill-loadout/issues", "_blank", "noreferrer"); } }, t("link.feedback")))), h("p", { className: "dssm-desc" }, t("desc")))), tabs] as React.ReactNode[]).concat(scope === "trash" || scope === "repositories" || scope === "loadouts" ? [] : skillControls, [result && modal !== "import" ? h("div", { key: "result", className: "dssm-feedback" + (result.warning ? " dssm-warning" : result.ok ? "" : " dssm-error") }, result.text) : null], (data.warnings || []).map(function (warning, index) { return h("div", { key: "warning-" + index, className: "dssm-feedback dssm-warning", role: "alert" }, translateError(t, warning)); }), [snapshot.error ? h("div", { key: "error", className: "dssm-feedback dssm-error" }, snapshot.error) : null, scope === "repositories" ? repositoryUI.content : snapshot.loading && !snapshot.data ? h("div", { key: "loading", className: "dssm-empty" }, t("loading")) : scope === "trash" ? renderTrash() : scope === "loadouts" ? renderLoadouts() : renderList()]);
 
