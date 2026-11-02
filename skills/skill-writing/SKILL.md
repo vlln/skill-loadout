@@ -9,7 +9,7 @@ license: MIT
 metadata:
   face: quality
   author: vlln
-  version: "2.3.0"
+  version: "2.4.0"
 ---
 
 # 写一份 skill
@@ -52,6 +52,11 @@ metadata:
 | 决定是否安装的人 | 仓库 README | agent 工作流、内部设计理由 |
 | 使用它的 agent | `SKILL.md` + `references/` | 安装说明、维护者笔记 |
 | 维护者 | README 旁注、`docs/` | 运行期才需要的指令 |
+
+**skill 仓库的 README 有两条专属判据：**
+
+- **技能表必须有 face 列**：每份 skill 一行，写明它主要回答哪类问题（流程 / 质量 / 执行）。读者按任务挑 skill 时，face 是第一眼的分组依据。
+- **安装方式至少给两种，覆盖三类读者**：本仓库的推荐工具（如 skit）；生态通用 CLI——`npx skills add <owner>/<repo> --skill <名>`（需 Node.js ≥ 22.20；脚本化时加 `--agent <名> -y` 跳过交互，核对 2026-11-02）；以及一段可直接发给 agent 的 prompt（让 agent 运行 `npx skills use <owner>/<repo>@<名>` 并照生成的指令执行），什么都没装的读者走这条路。
 
 **独立**
 

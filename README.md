@@ -44,11 +44,25 @@
 
 ## 安装
 
+推荐 skit：
+
 ```sh
 skit install vlln/skill-loadout/skills/skill-atlas vlln/skill-loadout/skills/skill-writing      # 定位与合格线
 skit install vlln/skill-loadout/skills/skill-making vlln/skill-loadout/skills/improvement-loop  # 流程与改进回路
 skit install vlln/skill-loadout/skills/skit                                    # 安装与校验命令
 skit check
+```
+
+生态通用 CLI（需 Node.js ≥ 22.20）：
+
+```sh
+npx skills add vlln/skill-loadout --skill skill-writing    # 例；换 --skill 装别的
+```
+
+什么都没装时，把这段直接发给 agent，让它自己装自己用：
+
+```text
+Run `npx skills use "vlln/skill-loadout@skill-writing"` and follow the generated skill instructions now. Read its complete output, redirecting it to a temporary file first if necessary. Resolve relative paths from the supporting-files directory it provides.
 ```
 
 本地开发时克隆后用 `./skills/<名>` 直装。五份互不引用，装一份也能用。
