@@ -8,9 +8,9 @@
 
 ## 当前状态
 
-**理论已定骨架，方法跑过三轮真实对照。** [THEORY.md](THEORY.md) 是唯一权威；[docs/status.md](docs/status.md) 写清每条结论的证据有多硬、哪些预测还没测过。
+**理论已定骨架，方法跑过五轮真实对照。** [THEORY.md](THEORY.md) 是唯一权威；[docs/status.md](docs/status.md) 写清每条结论的证据有多硬、哪些预测还没测过。
 
-两个产品仓库是这套方法的产出，也是它的证据：一份 README 写作 skill，一组通用软件开发 skill（7 份）。夹具与每一轮的原始产出都随它们入库。
+产品仓库 [sw-dev-loadout](https://github.com/vlln/sw-dev-loadout) 是这套方法的产出，也是它的证据：8 份 skill（7 份通用软件开发 + 1 份 README 写作，后者原是独立仓库，实验完成后整体并入）。夹具与每一轮的原始产出都随它入库。
 
 五份 skill，覆盖三个面：
 
@@ -26,16 +26,14 @@
 
 ## 安装
 
-这个仓库还没有推到远端，先克隆或下载，然后按需装：
-
 ```sh
-skit install ./skills/skill-atlas ./skills/skill-writing      # 定位与合格线
-skit install ./skills/skill-making ./skills/improvement-loop  # 流程与改进回路
-skit install ./skills/skit                                    # 安装与校验命令
+skit install vlln/skill-loadout/skills/skill-atlas vlln/skill-loadout/skills/skill-writing      # 定位与合格线
+skit install vlln/skill-loadout/skills/skill-making vlln/skill-loadout/skills/improvement-loop  # 流程与改进回路
+skit install vlln/skill-loadout/skills/skit                                    # 安装与校验命令
 skit check
 ```
 
-五份互不引用，装一份也能用。
+本地开发时克隆后用 `./skills/<名>` 直装。五份互不引用，装一份也能用。
 
 ## 结构
 
