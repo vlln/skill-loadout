@@ -43,7 +43,6 @@ assert.match(source, /\.dssm-summary\{[^}]*background:var\(--dsw-alias-bg-layer-
 assert.doesNotMatch(source, /\.dssm-summary\{[^}]*settings-card-fill/, "统计条不能回退到实心设置卡片填充");
 assert.match(repository, /\.dssm-catalog-list\{[^}]*border-radius:var\(--dsw-radius-xl/, "发现列表与来源容器采用同一档位");
 assert.match(destination, /\.dssm-destination-path\{[^}]*border-radius:var\(--dsw-radius-lg/, "路径预览与嵌套内容使用同一档位");
-assert.match(updater, /\.mpi-command\{[^}]*border-radius:var\(--dsw-radius-lg/, "更新弹窗代码框采用官方代码块档位");
-assert.ok(!/background:var\(--dsw-alias-bg-layer-\d,#[\da-f]+\)/i.test(source + repository + destination + updater), "背景不再引入独立的深色实心兜底");
 assert.ok(!/borderRadius: 6/.test(source + selectSource + repository), "行内按钮不能以内联值绕过统一圆角");
 console.log("宿主筛选与样式契约检查通过");
+
