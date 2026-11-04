@@ -4,6 +4,8 @@ import type { ApiCall, ApiRoutes, Translate, ModalProps, SourceSelectProps } fro
 import type { DestinationKit, DestinationValue } from './destination-types.js';
 import type { WorkspaceRow } from './core.js';
 import type { InstallSource, Diagnostic, RepositoryRoot, RepositoryDestination } from './types.js';
+export type RepositorySource = 'github' | 'clawhub' | 'skillsh';
+export interface RepositoryUIProps { active: boolean; t: Translate; onInstalled?: () => unknown; initialSource?: RepositorySource; mode?: 'add' | 'manage'; }
 type RepoView = ApiRoutes['/repositories']['repositories'][number];
 type RepoCopy = { installedRoot: RepositoryRoot | null; installedWorkspace?: string; tracked?: boolean; status: string; updateAvailable?: boolean; canRollback?: boolean; canUninstall?: boolean };
 type RepoSkill = RepoView['skills'][number] & { installations?: RepoCopy[] };
@@ -22,19 +24,19 @@ export const repositoryLocales = {
     "repo.catalog.reassociate": "选择位置并重关联安装",
     "repo.catalog.unknownHint": "有旧目录安装记录位置未知；找到对应技能后可选择位置重关联安装。",
     "repo.catalog.loadMore": "再加载 10 条",
-    "repo.catalog.installRefreshWarning": "技能已安装并启用，但列表刷新失败。请重新打开发现页；不要重复安装。",
+    "repo.catalog.installRefreshWarning": "技能已添加到技能库，但列表刷新失败。请重新打开技能库；不要重复安装。",
     "repo.catalog.uninstallRefreshWarning": "技能已移入回收站，但列表刷新失败。请刷新技能列表或重新打开设置页；不要重复卸载。",
     "repo.installElsewhere": "安装到其他位置", "repo.destinationUnavailable": "原项目未登记或目录不可用，无法管理此副本。请在侧栏重新登记原项目后刷新。", "repo.scope.user": "全局", "repo.scope.project": "项目", "repo.source.dsh": "DSH", "repo.source.agents": "Shared Agent",
     "repo.refreshing": "正在检查更新…", "repo.refreshed": "刷新与更新检查完成", "repo.partialRefreshFailed": "部分仓库检查更新失败（{names}），其余已完成", "repo.detailLoading": "正在读取技能说明…",
     "repo.local": "本机", "repo.source": "安装来源", "repo.update": "可更新", "repo.review": "查看更新", "repo.rollback": "恢复上一版", "repo.confirmUpdate": "备份并更新", "repo.confirmRollback": "备份并恢复", "repo.overwrite": "备份本地修改并替换", "repo.modified": "检测到本地修改。替换会覆盖当前文件，原文件将完整备份，可恢复。", "repo.noChanges": "文件内容没有变化。", "repo.added": "新增", "repo.removed": "删除", "repo.modifiedFile": "修改", "repo.updating": "更新中…", "repo.updateProgress": "正在校验、备份并替换，请稍候…", "repo.updateSuccess": "更新完成，已保留上一版备份。", "repo.rollbackSuccess": "已恢复上一版。", "repo.manageUpdate": "管理更新", "error.repo.modified": "存在本地修改，请预览并确认备份后替换。",
-    "scope.repositories": "发现技能", "repo.add": "添加仓库", "repo.manage": "管理仓库", "repo.refresh": "刷新并检查更新", "repo.save": "添加并扫描",
+    "scope.repositories": "发现技能", "repo.addRefreshWarning": "仓库已添加，但扫描或列表刷新失败。请在仓库管理中重试刷新，不要重复添加。", "repo.addGit": "添加 Git 仓库", "repo.add": "添加仓库", "repo.manage": "管理仓库", "repo.refresh": "刷新并检查更新", "repo.save": "添加并扫描",
     "repo.subsource.github": "Git 仓库", "repo.subsource.skillsh": "skills.sh", "repo.subsource.clawhub": "ClawHub", "repo.subsource.popular": "热门下载 Top 100", "repo.catalog.states": "全部状态", "repo.catalog.uninstalled": "未安装", "repo.catalog.searchClawhub": "搜索 ClawHub 技能", "repo.catalog.searchLoading": "正在搜索 ClawHub…", "repo.catalog.searchEmpty": "没有找到匹配的 ClawHub 技能。", "repo.catalog.searchError": "ClawHub 搜索失败，请重试。", "repo.catalog.searchSkillsh": "搜索 skills.sh 技能", "repo.catalog.skillshLoading": "正在搜索 skills.sh…", "repo.catalog.skillshEmpty": "没有找到匹配的 skills.sh 技能。", "repo.catalog.skillshError": "skills.sh 搜索失败，请重试。", "repo.sort.installs": "安装量从高到低", "repo.sort.name": "名称 A-Z", "repo.subsource.catalogNote": "ClawHub 下载量榜 · 最多 100 条，仅对当前显示条目排序", "repo.catalog.empty": "ClawHub 当前没有匹配的技能。", "repo.catalog.loading": "正在加载 ClawHub 榜单…", "repo.catalog.loadError": "ClawHub 榜单加载失败。请检查网络后重试。", "repo.catalog.retry": "重试", "repo.catalog.loadingMore": "正在加载更多…", "repo.catalog.downloads": "下载", "repo.catalog.installs": "安装", "repo.catalog.stars": "星标",
-    "repo.hint": "从已订阅的 Git 仓库或第三方目录发现技能，安装到用户目录的 DSH skills 或 Shared Agent，或已登记项目的 .dsh/skills。", "repo.footer": "刷新会检查仓库与技能更新，不会自动替换本地文件。历史备份不会自动清理，占用空间会随更新增加。",
-    "repo.search": "搜索仓库技能", "repo.all": "全部仓库", "repo.states": "全部状态", "repo.available": "可安装", "repo.installed": "已安装", "repo.conflict": "同名冲突", "repo.invalid": "格式无效", "repo.install": "安装", "repo.detail": "详情",
-    "repo.installing": "安装中…", "repo.installProgress": "正在读取并校验技能文件，请稍候…", "repo.installSuccess": "安装成功并已启用，可在对话中用斜杠调用。",
-    "repo.installDestination": "安装位置", "repo.rootDsh": "DSH skills", "repo.rootAgents": "Shared Agent", "repo.rootDshHint": "仅供 DSH 使用，路径以当前 DSH_HOME 为准。", "repo.rootExternalHint": "使用该目录的其他 Agent 也能读取此技能。", "repo.installLocationsHint": "用户目录可选 DSH skills 或 Shared Agent；已登记项目仅写入 .dsh/skills。选择器显示实际路径。缺少的目录会在确认安装后创建。不安全的路径不可选。",
+    "repo.hint": "从 Git 仓库或第三方目录搜索技能，添加到全局 DSH skills 或 Shared Agent。", "repo.footer": "刷新会检查仓库与技能更新，不会自动替换本地文件。历史备份不会自动清理，占用空间会随更新增加。",
+    "repo.searchSource": "搜索来源", "repo.searchOptions": "筛选与仓库操作", "repo.search": "搜索仓库技能", "repo.all": "全部仓库", "repo.states": "全部状态", "repo.available": "可安装", "repo.installed": "已安装", "repo.conflict": "同名冲突", "repo.invalid": "格式无效", "repo.install": "安装", "repo.detail": "详情",
+    "repo.installing": "安装中…", "repo.installProgress": "正在读取并校验技能文件，请稍候…", "repo.installSuccess": "已添加到技能库。可在会话中选择需要的技能。",
+    "repo.installDestination": "安装位置", "repo.rootDsh": "DSH skills", "repo.rootAgents": "Shared Agent", "repo.rootDshHint": "仅供 DSH 使用，路径以当前 DSH_HOME 为准。", "repo.rootExternalHint": "使用该目录的其他 Agent 也能读取此技能。", "repo.installLocationsHint": "添加到全局 DSH skills 或 Shared Agent。选择器显示实际路径；确认后创建缺少的目录。不安全的路径不可选。",
     "repo.uninstall": "卸载", "repo.confirmUninstall": "移至回收站", "repo.uninstallHint": "仅将此仓库已跟踪的安装副本移至回收站，包括本地修改。之后可在回收站恢复。", "repo.uninstallExternalWarning": "卸载该技能也会影响使用所选目录的其他 Agent。", "repo.uninstalling": "卸载中…", "repo.uninstallProgress": "正在将已安装的技能移至回收站，请稍候…", "repo.uninstallSuccess": "技能已移至回收站，可在回收站恢复。",
-    "repo.empty": "还没有技能仓库，添加一个 Git 仓库开始。", "repo.noSkills": "没有匹配的技能。可刷新仓库或调整筛选。",
+    "repo.empty": "还没有 Git 仓库。添加你信任的仓库，浏览其中的技能并加入技能库。", "repo.noSkills": "没有匹配的技能。可刷新仓库或调整筛选。",
     "repo.url": "仓库地址", "repo.urlPlaceholder": "owner/repo 或完整 Git 地址", "repo.ref": "分支或标签（可选）", "repo.directory": "技能子目录（可选）", "repo.defaultBranch": "留空使用默认分支", "repo.defaultBranchLabel": "默认分支", "repo.directoryHint": "例如 skills，留空扫描整个仓库",
     "repo.remove": "移除仓库", "repo.removeHint": "仅移除仓库订阅，已安装的技能会保留。", "repo.removeConfirm": "确认移除", "repo.cancel": "取消", "repo.close": "关闭", "repo.loading": "处理中…", "repo.success": "操作完成", "repo.installHint": "技能可能包含脚本，请先查看说明并确认信任来源。安装会保留资源文件，不会执行脚本。", "repo.commit": "扫描版本", "repo.notScanned": "尚未扫描", "repo.updated": "上次刷新", "repo.copyBody": "复制正文", "repo.copied": "已复制", "repo.copyFailed": "复制失败",
     "error.repo.tooLarge": "仓库超过大小限制，请选择较小的技能仓库。", "error.repo.transientTooLarge": "仓库临时下载体积过大（包含 Git 历史对象），请选择较小的技能仓库或提高临时大小限制。", "error.repo.noGit": "未检测到 Git 命令行工具，请先安装 Git 后重试。", "error.repo.installState": "技能文件已保留，但来源状态未确认。请恢复磁盘写入后重新打开仓库页，系统会校验文件并恢复记录。", "error.repo.capacity": "安装来源状态超过 16 MiB。请先清理不需要的回收记录或旧身份，仍有效的安装副本会保留。",
@@ -45,19 +47,19 @@ export const repositoryLocales = {
     "repo.catalog.reassociate": "Choose destination and reinstall to reassociate",
     "repo.catalog.unknownHint": "Some legacy catalog installs have unknown locations. Find the skill and choose a destination to reinstall and reassociate.",
     "repo.catalog.loadMore": "Load 10 more",
-    "repo.catalog.installRefreshWarning": "Installed and enabled, but the list could not refresh. Reopen Discover Skills; do not install again.",
+    "repo.catalog.installRefreshWarning": "Added to the skill library, but the list could not refresh. Reopen the library; do not install again.",
     "repo.catalog.uninstallRefreshWarning": "Moved to trash, but the list could not refresh. Refresh the skill list or reopen Settings; do not uninstall again.",
     "repo.installElsewhere": "Install elsewhere", "repo.destinationUnavailable": "The original project is unregistered or unavailable. Re-register it in the sidebar and refresh to manage this copy.", "repo.scope.user": "Global", "repo.scope.project": "Project", "repo.source.dsh": "DSH", "repo.source.agents": "Shared Agent",
     "repo.refreshing": "Checking updates…", "repo.refreshed": "Refresh and update check completed", "repo.partialRefreshFailed": "Failed to check updates for some repositories ({names}); others completed.", "repo.detailLoading": "Loading skill instructions…",
     "repo.local": "Local", "repo.source": "Installed from", "repo.update": "Update available", "repo.review": "Review update", "repo.rollback": "Restore previous version", "repo.confirmUpdate": "Back up and update", "repo.confirmRollback": "Back up and restore", "repo.overwrite": "Back up local edits and replace", "repo.modified": "Local edits detected. Replacement overwrites current files and keeps a complete backup for restoration.", "repo.noChanges": "No file changes.", "repo.added": "Added", "repo.removed": "Removed", "repo.modifiedFile": "Modified", "repo.updating": "Updating…", "repo.updateProgress": "Verifying, backing up and replacing files. Please wait…", "repo.updateSuccess": "Updated. Previous version backed up.", "repo.rollbackSuccess": "Previous version restored.", "repo.manageUpdate": "Manage updates", "error.repo.modified": "Local edits detected. Review and confirm replacement with a backup.",
-    "scope.repositories": "Discover Skills", "repo.add": "Add repository", "repo.manage": "Manage repositories", "repo.refresh": "Refresh & check updates", "repo.save": "Add and scan",
+    "scope.repositories": "Discover Skills", "repo.addRefreshWarning": "Repository added, but scanning or list refresh failed. Retry refresh in repository management; do not add it again.", "repo.addGit": "Add Git repository", "repo.add": "Add repository", "repo.manage": "Manage repositories", "repo.refresh": "Refresh & check updates", "repo.save": "Add and scan",
     "repo.subsource.github": "Git Repos", "repo.subsource.skillsh": "skills.sh", "repo.subsource.clawhub": "ClawHub", "repo.subsource.popular": "Top 100 by downloads", "repo.catalog.states": "All statuses", "repo.catalog.uninstalled": "Not installed", "repo.catalog.searchClawhub": "Search ClawHub skills", "repo.catalog.searchLoading": "Searching ClawHub…", "repo.catalog.searchEmpty": "No matching ClawHub skills were found.", "repo.catalog.searchError": "ClawHub search failed. Please retry.", "repo.catalog.searchSkillsh": "Search skills.sh", "repo.catalog.skillshLoading": "Searching skills.sh…", "repo.catalog.skillshEmpty": "No matching skills.sh skills were found.", "repo.catalog.skillshError": "skills.sh search failed. Please retry.", "repo.sort.installs": "Installs: high to low", "repo.sort.name": "Name A–Z", "repo.subsource.catalogNote": "ClawHub download ranking · Up to 100; sort only displayed items", "repo.catalog.empty": "No matching skills were returned by ClawHub.", "repo.catalog.loading": "Loading ClawHub ranking…", "repo.catalog.loadError": "Failed to load the ClawHub ranking. Check your connection and retry.", "repo.catalog.retry": "Retry", "repo.catalog.loadingMore": "Loading more…", "repo.catalog.downloads": "downloads", "repo.catalog.installs": "installs", "repo.catalog.stars": "stars",
-    "repo.hint": "Discover skills from subscribed Git repositories or community registries, and install them to user DSH skills or Shared Agent, or a registered project's .dsh/skills.", "repo.footer": "Refresh checks repositories and skill updates without replacing local files. Historical backups are not cleaned automatically and use additional disk space.",
-    "repo.search": "Search repository skills", "repo.all": "All repositories", "repo.states": "All statuses", "repo.available": "Available", "repo.installed": "Installed", "repo.conflict": "Name conflict", "repo.invalid": "Invalid format", "repo.install": "Install", "repo.detail": "Details",
-    "repo.installing": "Installing…", "repo.installProgress": "Reading and verifying skill files. Please wait…", "repo.installSuccess": "Installed and enabled. Invoke it from the slash menu.",
-    "repo.installDestination": "Installation destination", "repo.rootDsh": "DSH skills", "repo.rootAgents": "Shared Agent", "repo.rootDshHint": "For DSH only. The path uses your current DSH_HOME.", "repo.rootExternalHint": "Other agents using this directory can read this skill too.", "repo.installLocationsHint": "User directories offer DSH skills or Shared Agent; registered projects write only to .dsh/skills. The chooser shows actual paths. Missing directories are created after confirmation. Unsafe paths cannot be selected.",
+    "repo.hint": "Search Git repositories or community registries and add skills to global DSH skills or Shared Agent.", "repo.footer": "Refresh checks repositories and skill updates without replacing local files. Historical backups are not cleaned automatically and use additional disk space.",
+    "repo.searchSource": "Search source", "repo.searchOptions": "Filters and repository actions", "repo.search": "Search repository skills", "repo.all": "All repositories", "repo.states": "All statuses", "repo.available": "Available", "repo.installed": "Installed", "repo.conflict": "Name conflict", "repo.invalid": "Invalid format", "repo.install": "Install", "repo.detail": "Details",
+    "repo.installing": "Installing…", "repo.installProgress": "Reading and verifying skill files. Please wait…", "repo.installSuccess": "Added to the skill library. Choose the skills you need in a session.",
+    "repo.installDestination": "Installation destination", "repo.rootDsh": "DSH skills", "repo.rootAgents": "Shared Agent", "repo.rootDshHint": "For DSH only. The path uses your current DSH_HOME.", "repo.rootExternalHint": "Other agents using this directory can read this skill too.", "repo.installLocationsHint": "Add to global DSH skills or Shared Agent. The chooser shows actual paths. Missing directories are created after confirmation. Unsafe paths cannot be selected.",
     "repo.uninstall": "Uninstall", "repo.confirmUninstall": "Move to Trash", "repo.uninstallHint": "Move only this repository’s tracked installed copy, including local edits, to Trash. You can restore it from Trash later.", "repo.uninstallExternalWarning": "Uninstalling this skill also affects other agents that use the selected directory.", "repo.uninstalling": "Uninstalling…", "repo.uninstallProgress": "Moving the installed skill to Trash. Please wait…", "repo.uninstallSuccess": "Skill moved to Trash. You can restore it from Trash.",
-    "repo.empty": "No repositories yet. Add a Git repository to get started.", "repo.noSkills": "No matching skills. Refresh the repository or adjust your filters.",
+    "repo.empty": "No Git repositories yet. Add a repository you trust to browse its skills and add them to your library.", "repo.noSkills": "No matching skills. Refresh the repository or adjust your filters.",
     "repo.url": "Repository URL", "repo.urlPlaceholder": "owner/repo or full Git repository URL", "repo.ref": "Branch or tag (optional)", "repo.directory": "Skill subdirectory (optional)", "repo.defaultBranch": "Leave empty for the default branch", "repo.defaultBranchLabel": "default branch", "repo.directoryHint": "For example: skills. Leave empty to scan the repository.",
     "repo.remove": "Remove repository", "repo.removeHint": "This removes the subscription only. Installed skills are kept.", "repo.removeConfirm": "Confirm removal", "repo.cancel": "Cancel", "repo.close": "Close", "repo.loading": "Working…", "repo.success": "Completed", "repo.installHint": "Skills may include scripts. Read the instructions and trust the source before installing. Resources are copied; scripts are not executed.", "repo.commit": "Snapshot version", "repo.notScanned": "Not scanned yet", "repo.updated": "Last refreshed", "repo.copyBody": "Copy body", "repo.copied": "Copied", "repo.copyFailed": "Copy failed",
     "error.repo.tooLarge": "Repository exceeds size limit. Choose a smaller repository.", "error.repo.transientTooLarge": "Repository transient download size exceeds limit (including Git objects). Choose a smaller repository or increase temporary limit.", "error.repo.noGit": "Git command-line tool not found. Please install Git and retry.", "error.repo.installState": "Skill files were preserved but source tracking could not be saved. Restore disk write access and reopen Repositories to verify files and recover the record.", "error.repo.capacity": "Source tracking exceeds 16 MiB. Remove unneeded Trash records or legacy identities first. Active installation copies are kept.",
@@ -66,11 +68,6 @@ export const repositoryLocales = {
 };
 
 const CSS = `
-.dssm-subsources{display:flex;align-items:center;gap:6px;margin:0;border-bottom:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);padding-bottom:6px}
-.dssm-subsource-btn{padding:5px 12px;border:0.5px solid var(--dsw-alias-border-l2,#494949);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover,transparent));color:var(--dsw-alias-label-secondary,#b9b9b9);border-radius:var(--dsw-radius-sm,8px);font-size:12px;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
-.dssm-subsource-btn:hover{background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover,transparent));color:var(--dsw-alias-label-primary,#eee)}
-.dssm-subsource-btn.on{background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover,transparent));color:var(--dsw-alias-label-primary,#eee);border-color:var(--dsw-alias-border-l3,#555);font-weight:600}
-.dssm-subsource-btn:focus-visible{outline:2px solid var(--dsw-alias-border-l3,#555);outline-offset:2px}
 .dssm-catalog-list{border:0.5px solid var(--dsw-alias-border-l2,#494949);border-radius:var(--dsw-radius-xl,20px);overflow:hidden;background:transparent;margin-bottom:12px}.dssm-filters.dssm-catalog-filters .dssm-search{flex:1 1 160px;min-width:0;max-width:none}.dssm-catalog-installed{color:var(--dsw-alias-state-success-primary,#51b976);font-size:12px;white-space:nowrap}
 .dssm-catalog-list .dssm-repo-row{border-top:0.5px solid var(--dsw-alias-border-l1,#3a3a3a)}
 .dssm-catalog-list > div:first-child{border-top:0}
@@ -78,7 +75,14 @@ const CSS = `
 .dssm-meta-origin{color:var(--dsw-alias-label-secondary,#8e8e8e);font-size:11px;margin-top:2px}
 .dssm-btn-danger:not(:disabled){color:var(--dsw-alias-state-error-primary,#ef7272)}
 .dssm-status-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:var(--dsw-radius-sm,8px)}
-.dssm-repo-row .dssm-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:650;color:var(--dsw-alias-label-primary,#eeeeee)}.dssm-repo-row{display:flex;flex-direction:column;gap:6px;padding:11px 13px;border-top:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);background:transparent}.dssm-repo-head{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:nowrap}.dssm-repo-actions{display:flex;align-items:center;gap:8px;flex:none;flex-wrap:nowrap}.dssm-repo-actions button{flex:none}.dssm-repo-actions .dssm-repo-copy-actions{gap:8px;margin-left:0}.dssm-repo-main{flex:1;min-width:0}.dssm-repo-main>.dssm-repo-metadata{margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dssm-repo-description{margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:12px;line-height:18px}.dssm-repo-copies{display:flex;flex-direction:column;gap:2px;min-width:0}.dssm-repo-copy{display:flex;align-items:center;gap:8px;min-width:0;padding:0;border:0;background:transparent}.dssm-repo-copy .dssm-repo-metadata{font-size:12px;line-height:18px}.dssm-repo-copy-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex:none}.dssm-repo-spinner{display:inline-flex;align-items:center;justify-content:center;animation:dssm-spin .8s linear infinite;transform-origin:center;flex:none}.dssm-icon-action .dssm-repo-spinner{margin:0}button:not(.dssm-icon-action) .dssm-repo-spinner{margin-right:6px}@keyframes dssm-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.dssm-repo-spinner{animation:none}}.dssm-repo-commit-badge{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;font-size:11px;line-height:16px;padding:1px 6px;border-radius:var(--dsw-radius-xs,4px);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary,#b9b9b9);border:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);margin-left:12px;white-space:nowrap;user-select:all}.dssm-repo-panel{display:flex;flex-direction:column;gap:12px;min-width:0}.dssm-repo-panel .dssm-desc{margin:0}.dssm-repo-metadata{font-size:11px;color:var(--dsw-alias-label-tertiary,#a0a0a0);overflow-wrap:anywhere}.dssm-repo-panel .dssm-source{flex-shrink:0;overflow:hidden;border:0.5px solid var(--dsw-alias-border-l2,#494949);border-radius:var(--dsw-radius-xl,20px);background:transparent}.dssm-repo-panel .dssm-source-title{font-size:14px;font-weight:650;overflow-wrap:anywhere;display:inline-flex;align-items:center;gap:7px}.dssm-repo-panel .dssm-source-brand{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;flex-shrink:0;color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-repo-panel .dssm-source-brand svg{width:16px;height:16px;display:block}.dssm-repo-panel .dssm-source-path{min-width:0;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:11px}.dssm-repo-panel .dssm-count{padding:1px 6px;border-radius:999px;corner-shape:round;background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,0.08));font-size:11px;color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-repo-manage-row{flex-direction:row;align-items:center;justify-content:space-between;gap:12px}.dssm-repo-manage-row .dssm-repo-main{flex:1}.dssm-repo-manage-row .dssm-repo-actions{margin-left:auto}.dssm-repo-manage-row .dssm-repo-actions button{width:auto;flex:none}.dssm-repo-head .dssm-repo-actions{gap:8px}.dssm-repo-actions>.dssm-repo-copy-actions{display:contents}.dssm-icon-action{width:22px;min-width:22px;height:22px;padding:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-secondary,#b9b9b9);border-color:var(--dsw-alias-border-l2,#494949)}.dssm-icon-action:not(:disabled):not(.dssm-icon-danger):hover{color:var(--dsw-alias-link,#4176e6)!important;border-color:var(--dsw-alias-link,#4176e6)!important}.dssm-icon-action.dssm-icon-danger{color:var(--dsw-alias-state-error-primary,#ef7272);border-color:var(--dsw-alias-state-error-primary,#ef7272)}.dssm-repo-copies{display:flex;flex-direction:column;gap:4px;width:100%;margin-top:2px}.dssm-repo-copy{display:flex;align-items:center;gap:8px;width:100%;min-width:0;box-sizing:border-box;padding:4px 4px 4px 8px;border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,0.04))}.dssm-repo-copy .dssm-repo-metadata{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dssm-repo-copy .dssm-repo-copy-actions{margin-left:0}.dssm-repo-copy .dssm-icon-action.dssm-icon-danger{border-color:var(--dsw-alias-border-l2,#494949)}.dssm-repo-copy .dssm-icon-action.dssm-icon-danger:not(:disabled):hover{color:var(--dsw-alias-state-error-primary,#ef7272)!important;border-color:var(--dsw-alias-state-error-primary,#ef7272)!important}.dssm-repo-copy .dssm-repo-metadata{display:flex;align-items:center;min-width:0;flex:1;overflow:hidden;white-space:nowrap}.dssm-location-lead{flex:0 1 auto;max-width:50%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dssm-location-path{margin-left:auto;min-width:0;max-width:50%;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}`;
+.dssm-repo-row .dssm-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:650;color:var(--dsw-alias-label-primary,#eeeeee)}.dssm-repo-row{display:flex;flex-direction:column;gap:6px;padding:11px 13px;border-top:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);background:transparent}.dssm-repo-head{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:nowrap}.dssm-repo-actions{display:flex;align-items:center;gap:8px;flex:none;flex-wrap:nowrap}.dssm-repo-actions button{flex:none}.dssm-repo-actions .dssm-repo-copy-actions{gap:8px;margin-left:0}.dssm-repo-main{flex:1;min-width:0}.dssm-repo-main>.dssm-repo-metadata{margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dssm-repo-description{margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:12px;line-height:18px}.dssm-repo-copies{display:flex;flex-direction:column;gap:2px;min-width:0}.dssm-repo-copy{display:flex;align-items:center;gap:8px;min-width:0;padding:0;border:0;background:transparent}.dssm-repo-copy .dssm-repo-metadata{font-size:12px;line-height:18px}.dssm-repo-copy-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex:none}.dssm-repo-spinner{display:inline-flex;align-items:center;justify-content:center;animation:dssm-spin .8s linear infinite;transform-origin:center;flex:none}.dssm-icon-action .dssm-repo-spinner{margin:0}button:not(.dssm-icon-action) .dssm-repo-spinner{margin-right:6px}@keyframes dssm-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.dssm-repo-spinner{animation:none}}.dssm-repo-commit-badge{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;font-size:11px;line-height:16px;padding:1px 6px;border-radius:var(--dsw-radius-xs,4px);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary,#b9b9b9);border:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);margin-left:12px;white-space:nowrap;user-select:all}.dssm-repo-panel{display:flex;flex-direction:column;gap:12px;min-width:0}.dssm-repo-panel .dssm-desc{margin:0}.dssm-repo-metadata{font-size:11px;color:var(--dsw-alias-label-tertiary,#a0a0a0);overflow-wrap:anywhere}.dssm-repo-panel .dssm-source{flex-shrink:0;overflow:hidden;border:0.5px solid var(--dsw-alias-border-l2,#494949);border-radius:var(--dsw-radius-xl,20px);background:transparent}.dssm-repo-panel .dssm-source-title{font-size:14px;font-weight:650;overflow-wrap:anywhere;display:inline-flex;align-items:center;gap:7px}.dssm-repo-panel .dssm-source-brand{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;flex-shrink:0;color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-repo-panel .dssm-source-brand svg{width:16px;height:16px;display:block}.dssm-repo-panel .dssm-source-path{min-width:0;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:11px}.dssm-repo-panel .dssm-count{padding:1px 6px;border-radius:999px;corner-shape:round;background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,0.08));font-size:11px;color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-repo-manage-row{flex-direction:row;align-items:center;justify-content:space-between;gap:12px}.dssm-repo-manage-row .dssm-repo-main{flex:1}.dssm-repo-manage-row .dssm-repo-actions{margin-left:auto}.dssm-repo-manage-row .dssm-repo-actions button{width:auto;flex:none}.dssm-repo-head .dssm-repo-actions{gap:8px}.dssm-repo-actions>.dssm-repo-copy-actions{display:contents}.dssm-icon-action{width:22px;min-width:22px;height:22px;padding:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-secondary,#b9b9b9);border-color:var(--dsw-alias-border-l2,#494949)}.dssm-icon-action:not(:disabled):not(.dssm-icon-danger):hover{color:var(--dsw-alias-link,#4176e6)!important;border-color:var(--dsw-alias-link,#4176e6)!important}.dssm-icon-action.dssm-icon-danger{color:var(--dsw-alias-state-error-primary,#ef7272);border-color:var(--dsw-alias-state-error-primary,#ef7272)}.dssm-repo-copies{display:flex;flex-direction:column;gap:4px;width:100%;margin-top:2px}.dssm-repo-copy{display:flex;align-items:center;gap:8px;width:100%;min-width:0;box-sizing:border-box;padding:4px 4px 4px 8px;border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,0.04))}.dssm-repo-copy .dssm-repo-metadata{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dssm-repo-copy .dssm-repo-copy-actions{margin-left:0}.dssm-repo-copy .dssm-icon-action.dssm-icon-danger{border-color:var(--dsw-alias-border-l2,#494949)}.dssm-repo-copy .dssm-icon-action.dssm-icon-danger:not(:disabled):hover{color:var(--dsw-alias-state-error-primary,#ef7272)!important;border-color:var(--dsw-alias-state-error-primary,#ef7272)!important}.dssm-repo-copy .dssm-repo-metadata{display:flex;align-items:center;min-width:0;flex:1;overflow:hidden;white-space:nowrap}.dssm-location-lead{flex:0 1 auto;max-width:50%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dssm-location-path{margin-left:auto;min-width:0;max-width:50%;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.dssm-repo-panel .dssm-filters,.dssm-repo-panel .dssm-filter-actions,.dssm-repo-panel .dssm-modal-actions{display:flex;flex-wrap:wrap;gap:8px;min-width:0}
+.dssm-repo-panel .dssm-filter-actions{margin-left:auto}
+.dssm-repo-panel .dssm-filters>div{min-width:0;max-width:100%}
+.dssm-repo-panel .dssm-search{flex:1 1 160px;min-width:0}
+.dssm-repo-panel .dssm-empty{overflow-wrap:anywhere}
+@media(max-width:560px){.dssm-repo-head,.dssm-repo-copy,.dssm-repo-actions,.dssm-repo-manage-row{flex-wrap:wrap}.dssm-repo-head>.dssm-repo-main{flex-basis:180px}.dssm-repo-panel .dssm-filter-actions{margin-left:0;flex-wrap:wrap}.dssm-repo-copy-actions{flex-wrap:wrap}}
+`;
 
 /** 返回动作区与内容区，使现有标题、页签顺序保持不变。 */
 
@@ -144,8 +148,8 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
     return h("svg", { className: "dssm-fold-chevron" + (open ? " is-open" : ""), viewBox: "0 0 16 16", width: 12, height: 12, fill: "none", stroke: "currentColor", strokeWidth: 1.5, "aria-hidden": true }, h("path", { d: "M4 6l4 4 4-4", strokeLinecap: "round", strokeLinejoin: "round" }));
   }
   const PrimitiveButton = Button;
-  const { DestinationPicker, defaultDestination, destinationPayload, destinationReady } = destination;
-  return function useRepositoryUI({ active, t, onInstalled }: {active: boolean; t: Translate; onInstalled?: () => unknown}) {
+  const { defaultDestination, destinationPayload, destinationReady } = destination;
+  return function useRepositoryUI({ active, t, onInstalled, initialSource, mode = 'add' }: RepositoryUIProps) {
     const [repos, setRepos] = react.useState<RepoView[]>([]);
     const [installRoots, setInstallRoots] = react.useState<RepositoryDestination[]>([]);
     const [busy, setBusy] = react.useState(false);
@@ -157,9 +161,9 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
     const [status, setStatus] = react.useState("");
     const [expanded, setExpanded] = react.useState<Record<string, boolean>>({});
     const [modal, setModal] = react.useState<RepoModal | null>(null);
-    const [destination, setDestination] = react.useState<DestinationValue>(defaultDestination());
+    const [destination, setDestination] = react.useState<DestinationValue>({ ...defaultDestination(), scope: 'user', workspace: '' });
     const [workspaces, setWorkspaces] = react.useState<WorkspaceRow[]>([]);
-    const [subsource, setSubsource] = react.useState<'github' | 'skillsh' | 'clawhub'>('github');
+    const [subsource, setSubsource] = react.useState<RepositorySource>(initialSource || 'github');
     const [catalogQuery, setCatalogQuery] = react.useState("");
     const [catalogSort, setCatalogSort] = react.useState("");
     const [catalogStatus, setCatalogStatus] = react.useState("");
@@ -211,6 +215,15 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
         // 工作区列表只读登记信息，失败不影响仓库列表本身。
         api('/workspaces').then(listed => { if (mounted.current) setWorkspaces(listed.items || []); }).catch(() => undefined);
       }
+    }
+    function globalDestinationPicker() {
+      const roots = installRoots.filter(root => root.key === 'dsh' || root.key === 'agents');
+      const chosen = roots.find(root => root.key === destination.location);
+      return h('div', { className: 'dssm-destination' },
+        h(SourceSelect, { label: t('repo.installDestination'), value: destination.location, disabled: busy,
+          options: roots.map(root => ({ value: root.key, label: destinationName(root), disabled: !root.available })),
+          onChange: (value: string) => { if (!locked.current && (value === 'dsh' || value === 'agents') && roots.some(root => root.key === value && root.available)) setDestination({ scope: 'user', location: value, workspace: '' }); } }),
+        chosen?.path ? h('code', { className: 'dssm-destination-path' }, chosen.path) : null);
     }
     function destinationName(root: Pick<RepositoryDestination, 'key' | 'label' | 'localeKey'>) {
       if (root.key === 'dsh' || root.key === 'agents') return t(root.key === 'dsh' ? 'repo.rootDsh' : 'repo.rootAgents');
@@ -450,11 +463,63 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
         void fetchSkillshResults(normalized);
       }, 300);
     }
-    function selectSubsource(next: 'github' | 'skillsh' | 'clawhub') {
+    function selectSubsource(next: RepositorySource) {
       setModal(null);
       setSubsource(next);
 
     }
+    function openSource(next: RepositorySource, search?: string) {
+      if (locked.current) return;
+      setFeedback(null);
+      selectSubsource(next);
+      if (search !== undefined) {
+        if (next === "github") { setQuery(search); setExpanded({}); }
+        else if (next === "clawhub") updateClawHubQuery(search);
+        else updateSkillshQuery(search);
+      }
+    }
+    function openManage() {
+      if (locked.current) return;
+      setFeedback(null);
+      setModal({ type: 'manage' });
+    }
+    function openAddRepository(url = '') {
+      if (locked.current) return;
+      setFeedback(null);
+      setForm({ url, ref: '', subdirectory: '' });
+      setModal({ type: 'add' });
+    }
+    async function addRepository(url: string, options: { ref?: string; subdirectory?: string } = {}): Promise<boolean> {
+      if (locked.current || !url.trim()) return false;
+      locked.current = true; setBusy(true); setFeedback(null);
+      let committed = false;
+      try {
+        const repo = await post('add', { url: url.trim(), ref: options.ref || '', subdirectory: options.subdirectory || '' });
+        committed = true;
+        if (mounted.current) { setSubsource('github'); setSource(''); setQuery(''); setStatus(''); setModal(null); }
+        try {
+          const scanned = await post('refresh', { id: repo.id });
+          const diagnostic = scanned.error || (scanned as any).data?.error;
+          if (diagnostic) throw diagnostic;
+        } catch (error) {
+          // The subscription exists: retrying Add would duplicate the committed operation.
+          if (mounted.current) setFeedback({ error: true, key: 'repo.addRefreshWarning' });
+        }
+        try { await load(); } catch {
+          if (mounted.current) setFeedback({ error: true, key: 'repo.addRefreshWarning' });
+        }
+        return true;
+      } catch (error) {
+        if (mounted.current) setFeedback({ error: true, payload: error });
+        if (!committed) throw error;
+        return true;
+      } finally {
+        locked.current = false;
+        if (mounted.current) setBusy(false);
+      }
+    }
+    function openAdd() { openAddRepository(); }
+    react.useEffect(() => { if (active && mode === 'manage') openManage(); }, [active, mode]);
     function catalogNearBottom(node: HTMLElement) {
       const rect = node.getBoundingClientRect();
       let parent = node.parentElement;
@@ -541,7 +606,7 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
     function confirmCatalogInstall() {
       if (!modal || modal.type !== "catalog-install" || !destinationReady(destination, workspaces, installRoots)) return;
       const target = modal.target;
-      const scope = destinationPayload(destination);
+      const scope = destinationPayload({ ...destination, scope: 'user', workspace: '' });
       return perform(async () => {
         const installed = await api("/catalog/install", { method: "POST", headers, body: JSON.stringify({ ...target, ...scope }) });
         if (!mounted.current) return;
@@ -662,7 +727,7 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
       if (!modal || (modal.type !== 'install' && modal.type !== 'uninstall')) return;
       const selected = modal, action = selected.type, chosen = destination;
       if (action === 'install' && !destinationReady(chosen, workspaces, installRoots)) return;
-      const scope = action === 'install' ? destinationPayload(chosen) : selected.copy && copyTarget(selected.copy);
+      const scope = action === 'install' ? destinationPayload({ ...chosen, scope: 'user', workspace: '' }) : selected.copy && copyTarget(selected.copy);
       if (!scope) return;
       return perform(async () => {
         const target = { id: selected.repo.id, path: selected.skill.path, ...scope };
@@ -710,35 +775,13 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
         if (onInstalled) await onInstalled();
       });
     }
-    function toolbarIconButton(key: string, iconD: string, action: () => unknown) {
-      return h(PrimitiveButton, {
-        className: "dssm-icon-action",
-        variant: "outline",
-        size: "sm",
-        disabled: busy,
-        "aria-label": t(key),
-        title: t(key),
-        icon: rowGlyph(iconD),
-        style: {
-          width: 22,
-          minWidth: 22,
-          height: 22,
-          padding: 0,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          borderRadius: "var(--dsw-radius-sm, 8px)"
-        },
-        onClick: action
-      });
-    }
     function refreshIconButton(selected: RepoView[]) {
-      const pending = refreshing && refreshing.id === selected[0]?.id;
+      const pending = !!refreshing;
       return h(PrimitiveButton, {
         className: "dssm-icon-action",
         variant: "outline",
         size: "sm",
-        disabled: busy || !selected.length,
+        disabled: busy || !!refreshing || !selected.length,
         "aria-busy": !!pending,
         "aria-label": t(pending ? "repo.refreshing" : "repo.refresh"),
         title: t(pending ? "repo.refreshing" : "repo.refresh"),
@@ -758,23 +801,18 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
     }
     function repositoryFilterActions() {
       return h("div", { className: "dssm-filter-actions" },
-        refreshIconButton(repos),
-        toolbarIconButton("repo.add", "M8 2.5v11M2.5 8h11", () => { setFeedback(null); setForm({ url: "", ref: "", subdirectory: "" }); setModal({ type: "add" }); }),
-        toolbarIconButton("repo.manage", "M2.5 4.5h11M2.5 8h11M2.5 11.5h11", () => { setFeedback(null); setModal({ type: "manage" }); })
-      );
+        repos.length ? refreshIconButton(repos) : null,
+        button("repo.add", openAdd, false),
+        repos.length ? button("repo.manage", openManage) : null);
     }
-    const actions = h("div", { key: "repository-actions", className: "dssm-actions" },
-      refreshButton(repos),
-      button("repo.add", () => { setFeedback(null); setForm({ url: "", ref: "", subdirectory: "" }); setModal({ type: "add" }); }, false),
-      button("repo.manage", () => { setFeedback(null); setModal({ type: "manage" }); }));
+    const actions = h("div", { key: "repository-actions", className: "dssm-actions", style: { display: "flex", flexWrap: "wrap", gap: 8 } },
+      repos.length ? refreshButton(repos) : null,
+      button("repo.add", openAdd, false),
+      repos.length ? button("repo.manage", openManage) : null);
     const visibleRepos = repos.filter((r) => !source || r.id === source);
     function renderCopyActions(repo: RepoView, skill: RepoSkill, copy: RepoCopy) {
-      const target = copyTarget(copy);
-      const pending = installation?.id === repo.id && installation.path === skill.path && installation.pending && target && installation.root === target.root && installation.workspace === target.workspace;
       return h('div', { className: 'dssm-repo-copy-actions' },
-          copy.tracked && (copy.updateAvailable || copy.status === 'conflict') ? rowIcon('repo.review', () => preview(repo, skill, copy), !target) : null,
-          copy.canRollback ? rowIcon('repo.rollback', () => preview(repo, skill, copy, true), !target) : null,
-          copy.canUninstall ? rowIcon(pending && installation.action === 'uninstall' ? 'repo.uninstalling' : 'repo.uninstall', () => openInstallation('uninstall', repo, skill, copy), !target, locationLabel(copy)) : null);
+        copy.tracked && (copy.updateAvailable || copy.status === 'conflict') ? rowIcon('repo.review', () => preview(repo, skill, copy), !copyTarget(copy)) : null);
     }
     function renderCopy(repo: RepoView, skill: RepoSkill, copy: RepoCopy) {
       const target = copyTarget(copy);
@@ -825,8 +863,7 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
             let footer: React.ReactNode;
             if (modal.type === 'install') body = h('div', { className: 'dssm-repo-panel', 'aria-busy': busy },
               h('div', { className: 'dssm-name' }, modal.skill.name),
-              h(DestinationPicker, { t, value: destination, disabled: busy, allowAgents: true, workspaces, userDestinations: installRoots,
-                onChange: (next: Partial<DestinationValue>) => { if (!locked.current) setDestination({ ...destination, ...next }); } }),
+              globalDestinationPicker(),
               h('p', { className: 'dssm-note' }, t('repo.installLocationsHint')),
               h('p', { className: 'dssm-note' }, t('repo.installHint')),
               busy ? h('div', { role: 'status', 'aria-live': 'polite' }, t('repo.installProgress')) : null, feedbackNode,
@@ -844,16 +881,17 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
               body = h("div", { className: "dssm-repo-panel" },
                 h("div", { className: "dssm-name" }, modal.skill.name),
                 h('div', { className: 'dssm-repo-metadata' }, copyName(modal.copy)),
+                h("p", { className: "dssm-note" }, t("repo.footer")),
                 h("div", { className: "dssm-repo-metadata" }, modal.repo.owner + "/" + modal.repo.name + " · " + modal.detail.commit?.slice(0, 7)),
                 modal.detail.localModified ? h("p", { className: "dssm-feedback dssm-warning", role: "alert" }, t("repo.modified")) : null,
                 modal.detail.changes.length ? h("ul", { style: { maxHeight: "240px", overflow: "auto", overflowWrap: "anywhere", paddingLeft: "20px" } }, modal.detail.changes.map(change => h("li", { key: change.path }, t("repo." + (change.kind === "modified" ? "modifiedFile" : change.kind)) + " · " + change.path))) : h("p", null, t("repo.noChanges")),
                 busy ? h("div", { role: "status" }, t("repo.updateProgress")) : null, feedbackNode);
               footer = h(react.Fragment, null, button("repo.cancel", close), button(modal.detail.localModified ? "repo.overwrite" : modal.type === "rollback" ? "repo.confirmRollback" : "repo.confirmUpdate", update, false, !modal.detail.changes.length || !copyTarget(modal.copy)));
             }
-      if (modal.type === "add") body = h("form", { className: "dssm-form", onSubmit: (e: React.FormEvent<HTMLFormElement>) => { e.preventDefault(); if (!form.url.trim()) return; perform(async () => { const repo = await post("add", form); await refreshRepo(repo.id); setModal(null); }); } },
+      if (modal.type === "add") body = h("form", { className: "dssm-form", onSubmit: (e: React.FormEvent<HTMLFormElement>) => { e.preventDefault(); if (!form.url.trim()) return; void addRepository(form.url, form).catch(() => undefined); } },
         [["url", "repo.url", t("repo.urlPlaceholder")], ["ref", "repo.ref", t("repo.defaultBranch")], ["subdirectory", "repo.directory", t("repo.directoryHint")]].map(([key, label, placeholder]) => h("label", { className: "dssm-field", key }, h("span", { className: "dssm-label" }, t(label)), h(Input, { "aria-label": t(label), value: form[key], placeholder, maxLength: key === "url" ? 2048 : 512, required: key === "url", disabled: busy, onChange: (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value }) }))),
-        feedbackNode, h("div", { className: "dssm-modal-actions" }, button("repo.cancel", close), button("repo.save", () => { if (form.url.trim()) perform(async () => { const repo = await post("add", form); await refreshRepo(repo.id); setModal(null); }); }, false, !form.url.trim())));
-      if (modal.type === "manage") body = h("div", { className: "dssm-repo-panel" }, h("p", { className: "dssm-desc" }, t("repo.removeHint")), refreshProgress, feedbackNode, manageRows());
+        feedbackNode, h("div", { className: "dssm-modal-actions" }, button("repo.cancel", close), button("repo.save", () => { if (form.url.trim()) void addRepository(form.url, form).catch(() => undefined); }, false, !form.url.trim())));
+      if (modal.type === "manage") body = h("div", { className: "dssm-repo-panel" }, h("p", { className: "dssm-desc" }, t("repo.removeHint")), h("p", { className: "dssm-note" }, t("repo.footer")), button("repo.add", openAdd, false), refreshProgress, feedbackNode, manageRows());
       if (modal.type === "remove") {
               description = t("repo.removeHint");
               body = h("div", null, h("div", { className: "dssm-name" }, modal.repo.owner + "/" + modal.repo.name), feedbackNode);
@@ -880,7 +918,7 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
       if (modal.type === "catalog-detail" && !modal.detail) body = h("div", { role: "status", className: "dssm-repo-panel" }, modal.loading ? t("repo.detailLoading") : null, modal.failed ? feedbackNode : null);
       if (modal.type === "catalog-install") body = h("div", { className: "dssm-repo-panel", "aria-busy": busy },
         h("div", { className: "dssm-name" }, modal.target.name),
-        h(DestinationPicker, { t, value: destination, disabled: busy, allowAgents: true, workspaces, userDestinations: installRoots, onChange: (next: Partial<DestinationValue>) => { if (!locked.current) setDestination({ ...destination, ...next }); } }),
+        globalDestinationPicker(),
         h("p", { className: "dssm-note" }, t("repo.installLocationsHint")),
         h("p", { className: "dssm-note" }, t("repo.installHint")),
         busy ? h("div", { role: "status", "aria-live": "polite" }, t("repo.installProgress")) : null, feedbackNode,
@@ -946,7 +984,7 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
           if (!copies.length) return null;
           return h("div", { className: "dssm-repo-copies" }, copies.map(copy => h("div", { className: "dssm-repo-copy", key: JSON.stringify([copy.id, copy.installedRoot, copy.installedWorkspace || ""]) },
                       renderLocation(copy),
-                      copy.canUninstall ? rowIcon("repo.uninstall", () => openCatalogUninstall(copy), false, locationLabel(copy)) : null)));
+                      null)));
         }
     const filteredCatalogItems = catalogItems.filter(item => {
       const installed = catalogInstalled(`clawhub:${item.owner}/${item.slug}`);
@@ -1016,36 +1054,40 @@ export function createRepositoryUI({ react, Modal, Input, Button, SourceSelect, 
           skillshError ? h("div", { className: "dssm-feedback dssm-error", role: "alert" }, t("repo.catalog.skillshError"), h(PrimitiveButton, { variant: "ghost", size: "sm", onClick: () => { void fetchSkillshResults(skillshQuery.trim()); } }, t("repo.catalog.retry"))) : null
         );
 
-    const subsourceToolbar = h("div", { className: "dssm-subsources" },
-      h("button", { type: "button", className: "dssm-subsource-btn" + (subsource === "github" ? " on" : ""), "aria-pressed": subsource === "github", onClick: () => selectSubsource("github") }, t("repo.subsource.github") + " (" + repos.length + ")"),
-      h("button", { type: "button", className: "dssm-subsource-btn" + (subsource === "clawhub" ? " on" : ""), "aria-pressed": subsource === "clawhub", onClick: () => selectSubsource("clawhub") }, t("repo.subsource.clawhub")),
-      h("button", { type: "button", className: "dssm-subsource-btn" + (subsource === "skillsh" ? " on" : ""), "aria-pressed": subsource === "skillsh", onClick: () => selectSubsource("skillsh") }, t("repo.subsource.skillsh"))
-    );
-
-    const filtersRow = subsource === "github" ? h("div", { className: "dssm-filters" },
-        h("div", { className: "dssm-source-filter" }, select("repo.all", source, setSource, repos.map((r) => [r.id, r.owner + "/" + r.name]))),
-        h("div", { className: "dssm-status-filter" }, select("repo.states", status, (value) => { setStatus(value); setExpanded({}); }, ["available", "installed", "update", "conflict", "invalid"].map((s) => [s, t("repo." + s)]))),
-        h(Input, { className: "dssm-search", allowClear: true, "aria-label": t("repo.search"), placeholder: t("repo.search"), value: query, onChange: (e: { target: { value: string } }) => { setQuery(e.target.value); setExpanded({}); } }),
-        repositoryFilterActions()
-      ) : subsource === "clawhub" ? h("div", { className: "dssm-filters dssm-catalog-filters" },
-              !catalogQuery.trim() ? h("div", { className: "dssm-catalog-sort-filter" }, select("repo.subsource.popular", catalogSort, setCatalogSort, [["installs", t("repo.sort.installs")], ["name", t("repo.sort.name")]])) : null,
-              !catalogQuery.trim() ? h("div", { className: "dssm-catalog-status-filter" }, select("repo.catalog.states", catalogStatus, setCatalogStatus, [["available", t("repo.available")], ["installed", t("repo.installed")]])) : null,
-              h(Input, { className: "dssm-search", allowClear: true, maxLength: 100, "aria-label": t("repo.catalog.searchClawhub"), placeholder: t("repo.catalog.searchClawhub"), value: catalogQuery, onChange: (e: { target: { value: string } }) => updateClawHubQuery(e.target.value) })
-            ) : subsource === "skillsh" ? h("div", { className: "dssm-filters dssm-catalog-filters dssm-skillsh-filters" },
-              h("div", { className: "dssm-catalog-status-filter" }, select("repo.catalog.states", skillshStatus, setSkillshStatus, [["available", t("repo.catalog.uninstalled")], ["installed", t("repo.installed")]])),
-              h(Input, { className: "dssm-search", allowClear: true, maxLength: 100, "aria-label": t("repo.catalog.searchSkillsh"), placeholder: t("repo.catalog.searchSkillsh"), value: skillshQuery, onChange: (e: { target: { value: string } }) => updateSkillshQuery(e.target.value) })
-            ) : null;
+    function setSearch(value: string) {
+      if (subsource === 'github') { setQuery(value); setExpanded({}); }
+      else if (subsource === 'clawhub') updateClawHubQuery(value);
+      else updateSkillshQuery(value);
+    }
+    const searchKey = subsource === 'github' ? 'repo.search' : subsource === 'clawhub' ? 'repo.catalog.searchClawhub' : 'repo.catalog.searchSkillsh';
+    const filtersRow = h('div', { className: 'dssm-filters dssm-discovery-search' },
+      h(SourceSelect, { label: t('repo.searchSource'), value: subsource, options: ['github', 'clawhub', 'skillsh'].map(value => ({ value, label: t('repo.subsource.' + value) })),
+        onChange: (value: string) => { if (value === 'github' || value === 'clawhub' || value === 'skillsh') openSource(value); } }),
+      h(Input, { className: 'dssm-search', allowClear: true, maxLength: 100, 'aria-label': t(searchKey), placeholder: t(searchKey), value: subsource === 'github' ? query : subsource === 'clawhub' ? catalogQuery : skillshQuery,
+        onChange: (event: { target: { value: string } }) => setSearch(event.target.value) }));
+    const secondaryFilters = h('details', { className: 'dssm-discovery-options' },
+      h('summary', null, t('repo.searchOptions')),
+      h('div', { className: 'dssm-filters' },
+        subsource === 'github' && repos.length ? [
+          select('repo.all', source, setSource, repos.map(repo => [repo.id, repo.owner + '/' + repo.name])),
+          select('repo.states', status, value => { setStatus(value); setExpanded({}); }, ['available', 'installed', 'update', 'conflict', 'invalid'].map(value => [value, t('repo.' + value)])),
+          repositoryFilterActions()] : null,
+        subsource === 'clawhub' && !catalogQuery.trim() ? [
+          select('repo.subsource.popular', catalogSort, setCatalogSort, [['installs', t('repo.sort.installs')], ['name', t('repo.sort.name')]]),
+          select('repo.catalog.states', catalogStatus, setCatalogStatus, [['available', t('repo.available')], ['installed', t('repo.installed')]])] : null,
+        subsource === 'skillsh' ? select('repo.catalog.states', skillshStatus, setSkillshStatus, [['available', t('repo.catalog.uninstalled')], ['installed', t('repo.installed')]]) : null));
 
     const content = h("div", { key: "repositories", id: "dssm-scope-panel", role: "tabpanel", "aria-labelledby": "dssm-tab-repositories", className: "dssm-repo-panel", "aria-busy": busy }, h("style", null, CSS),
-      subsourceToolbar,
-      subsource === "github" ? h("p", { className: "dssm-desc" }, t("repo.hint")) : subsource === "clawhub" && !catalogQuery.trim() ? h("p", { className: "dssm-desc" }, t("repo.subsource.catalogNote")) : null,
+
+      subsource === "clawhub" && !catalogQuery.trim() ? h("p", { className: "dssm-desc" }, t("repo.subsource.catalogNote")) : null,
       filtersRow,
+      subsource !== "github" || repos.length ? secondaryFilters : null,
       catalogUnknownIds.length ? h("div", { className: "dssm-note", role: "status" }, t("repo.catalog.unknownHint")) : null,
       catalogWarnings.map(warning => h("div", { key: warning.id, className: "dssm-feedback dssm-error", role: "alert" }, warning.id + " · " + message(warning))),
       feedbackNode, !modal ? refreshProgress : null, busy && !refreshing ? h("div", { className: "dssm-note", role: "status" }, t("repo.loading")) : null,
-      subsource === "github" ? (repos.length ? groups : h("div", { className: "dssm-empty" }, t("repo.empty"))) :
+      subsource === "github" ? (repos.length ? groups : h("div", { className: "dssm-empty" }, h("p", null, t("repo.empty")), button("repo.addGit", openAdd, false))) :
         subsource === "skillsh" ? skillshView : catalogQuery.trim() ? clawhubSearchView : catalogView,
-      h("p", { className: "dssm-note" }, t("repo.footer")), dialog);
-    return { actions, content, focusSource: (origin: InstallSource, name: string) => { setSource(origin.id); setQuery(name); setStatus(""); setExpanded({ [origin.id]: true }); } };
+      dialog);
+    return { actions, content, openSource, openManage, openAddRepository, addRepository, setSearch, activeDialog: dialog ? h(react.Fragment, null, h('style', null, CSS), dialog) : null, focusSource: (origin: InstallSource, name: string) => { setSource(origin.id); setQuery(name); setStatus(""); setExpanded({ [origin.id]: true }); } };
   };
 }

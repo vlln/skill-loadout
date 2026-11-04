@@ -9,10 +9,7 @@ process.env.DSH_HOME = join(temporary, "dsh");
 process.env.DSH_AGENTS_HOME = join(temporary, "agents");
 process.env.DSH_CODEX_HOME = join(temporary, "codex");
 process.env.HOME = process.env.USERPROFILE = join(temporary, "user");
-const { createCategory, renameCategory, deleteCategory, assignSkillCategory, moveSkillInCategory, setCategoryEnabled, readManagerState, state, projectRoots, deleteSkill, restoreTrash, permanentlyDeleteTrash, setGatekeeper } = await import("../lib/core.js");
-// 本测试断言 v1 的分类启停语义（关掉守门人 = 与现状逐字节一致），显式关闭（装了插件默认开）。
-await setGatekeeper(false);
-
+const { createCategory, renameCategory, deleteCategory, assignSkillCategory, moveSkillInCategory, setCategoryEnabled, readManagerState, state, projectRoots, deleteSkill, restoreTrash, permanentlyDeleteTrash, createLoadout, setSessionLoadout } = await import("../lib/core.js");
 const skillText = (name) => `---\nname: ${name}\ndescription: 测试技能\n---\n正文\n`;
 const writeSkill = async (root, name, text = skillText(name)) => {
   const dir = join(root, name);
@@ -48,28 +45,19 @@ const duplicate = await createCategory("dsh", "工作");
 assert.equal(duplicate.ok, false);
 assert.equal(duplicate.code, "error.category.duplicate");
 
-const toggled = await setCategoryEnabled("dsh", created.category.id, false);
-assert.equal(toggled.changed, 1);
-assert.deepEqual(toggled.skipped, []);
-assert.equal(await readFile(kept, "utf8"), before, "整组启停不改技能文件");
-const disabled = (await state()).roots.find((root) => root.key === "dsh").skills.find((item) => item.name === "kept-skill");
-assert.equal(disabled.enabled, false);
-
-const broken = await assignSkillCategory("dsh", "broken-skill", created.category.id);
-assert.equal(broken.ok, undefined);
-const skipped = await setCategoryEnabled("dsh", created.category.id, true);
-assert.equal(skipped.skipped.includes("broken-skill"), true, "结构不完整的技能被跳过");
-assert.equal((await state()).roots.find((root) => root.key === "dsh").skills.find((item) => item.name === "kept-skill").enabled, true);
-
+const loadout = (await createLoadout("Category fixture", null, [{ root: "dsh", name: "kept-skill" }])).loadout;
+await setSessionLoadout("category-session", loadout.id);
+for (const categoryId of [created.category.id, "", "*"]) {
+  assert.equal((await setCategoryEnabled("dsh", categoryId, false)).code, "error.policy.sessionOnly");
+  assert.equal((await setCategoryEnabled("dsh", categoryId, true)).code, "error.policy.sessionOnly");
+}
+assert.equal(await readFile(kept, "utf8"), before, "rejected category toggles preserve files");
+assert.equal((await assignSkillCategory("dsh", "broken-skill", created.category.id)).ok, undefined);
 await writeSkill(dsh, "loose-skill");
-const looseOff = await setCategoryEnabled("dsh", "", false);
-assert.equal(looseOff.changed, 1, "未分类开关只动未归类技能");
-const afterLoose = (await state()).roots.find((root) => root.key === "dsh");
-assert.equal(afterLoose.skills.find((item) => item.name === "loose-skill").enabled, false);
-assert.equal(afterLoose.skills.find((item) => item.name === "kept-skill").enabled, true, "未分类开关不动已归类技能");
-const allOff = await setCategoryEnabled("dsh", "*", false);
-assert.equal(allOff.changed >= 1, true, "全部关闭才动这个来源里的可调用技能");
-assert.equal((await state()).roots.find((root) => root.key === "dsh").skills.find((item) => item.name === "kept-skill").enabled, false);
+const selected = (await state({ sessionId: "category-session" })).roots.find(root => root.key === "dsh");
+assert.equal(selected.skills.find(skill => skill.name === "kept-skill").enabled, true);
+assert.equal(selected.skills.find(skill => skill.name === "loose-skill").enabled, false);
+assert.equal(selected.skills.find(skill => skill.name === "broken-skill").enabled, false);
 
 const renamed = await renameCategory("dsh", created.category.id, "科研");
 assert.equal(renamed.category.name, "科研");

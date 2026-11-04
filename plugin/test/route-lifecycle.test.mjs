@@ -25,6 +25,9 @@ for (const [name, value] of Object.entries({
   skills: { registerProvider() { return () => {}; } },
   tools: {},
   sessions: {},
+  agents: { list: () => [] },
+  systemPrompt: { context: () => () => {} },
+  workingDirectory: { get: () => '/', ensure: async () => '/' },
 })) ctx.provide(name, value);
 
 try {

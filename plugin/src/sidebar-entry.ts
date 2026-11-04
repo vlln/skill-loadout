@@ -18,9 +18,6 @@ export const sidebarLocales = {
     "update.entry.desc": "允许检查并在线安装技能管理器的新版本。关闭后隐藏更新入口。",
     "update.entry.toggle": "切换在线更新",
     "update.entry.locked": "在线更新已被宿主配置禁用",
-    "gatekeeper.title": "守门人模式",
-    "gatekeeper.desc": "开启后，只有当前编组的成员与被手动引用的技能会加载。",
-    "gatekeeper.toggle": "切换守门人模式",
   },
   en: {
     "sidebar.entry.title": "Sidebar entry",
@@ -30,9 +27,6 @@ export const sidebarLocales = {
     "update.entry.desc": "Allow checking and installing new versions online. Hides the update entry when disabled.",
     "update.entry.toggle": "Toggle online updates",
     "update.entry.locked": "Online updates are disabled by the host configuration.",
-    "gatekeeper.title": "Gatekeeper mode",
-    "gatekeeper.desc": "When on, only members of the active loadout and explicitly referenced skills are loaded.",
-    "gatekeeper.toggle": "Toggle gatekeeper mode",
   },
 };
 
@@ -78,9 +72,6 @@ export function SkillBundleConfigCard(props: {
   onToggleOnlineUpdate?: (enabled: boolean) => void;
   onlineUpdateDisabled?: boolean;
   onlineUpdateLocked?: boolean;
-  gatekeeperEnabled?: boolean;
-  onToggleGatekeeper?: (enabled: boolean) => void;
-  gatekeeperDisabled?: boolean;
 }) {
   ensureSidebarEntryStyle();
   const {
@@ -92,9 +83,6 @@ export function SkillBundleConfigCard(props: {
     onToggleOnlineUpdate,
     onlineUpdateDisabled,
     onlineUpdateLocked,
-    gatekeeperEnabled = true,
-    onToggleGatekeeper,
-    gatekeeperDisabled,
   } = props;
 
   const rows = [
@@ -111,23 +99,6 @@ export function SkillBundleConfigCard(props: {
       })
     ),
   ];
-
-  if (typeof onToggleGatekeeper === "function") {
-    rows.push(
-      h("div", { key: "gatekeeper", className: "dssm-bundle-row" },
-        h("div", { className: "dssm-bundle-label-box" },
-          h("span", { className: "dssm-bundle-title" }, t("gatekeeper.title")),
-          h("span", { className: "dssm-bundle-desc" }, t("gatekeeper.desc"))
-        ),
-        h(PrimitiveSwitch, {
-          checked: gatekeeperEnabled,
-          onChange: onToggleGatekeeper,
-          label: t("gatekeeper.toggle"),
-          disabled: gatekeeperDisabled,
-        })
-      )
-    );
-  }
 
   if (typeof onToggleOnlineUpdate === "function") {
     rows.push(
@@ -157,17 +128,13 @@ function SkillBundleConfigCardWrapper(props: {
   getOnlineUpdateEnabled?: () => boolean;
   setOnlineUpdate?: (next: boolean) => Promise<unknown>;
   getOnlineUpdateLocked?: () => boolean;
-  getGatekeeperEnabled?: () => boolean;
-  setGatekeeper?: (next: boolean) => Promise<unknown>;
   subscribe: (fn: () => void) => () => void;
 }) {
   const [enabled, setEnabled] = React.useState(props.getEnabled);
   const [onlineUpdateEnabled, setOnlineUpdateEnabled] = React.useState(props.getOnlineUpdateEnabled ? props.getOnlineUpdateEnabled : () => true);
   const [onlineUpdateLocked, setOnlineUpdateLocked] = React.useState(props.getOnlineUpdateLocked ? props.getOnlineUpdateLocked : () => false);
-  const [gatekeeperEnabled, setGatekeeperEnabled] = React.useState(props.getGatekeeperEnabled ? props.getGatekeeperEnabled : () => true);
   const [savingSidebar, setSavingSidebar] = React.useState(false);
   const [savingUpdate, setSavingUpdate] = React.useState(false);
-  const [savingGatekeeper, setSavingGatekeeper] = React.useState(false);
 
   React.useEffect(() => {
     const syncState = () => {
@@ -177,9 +144,6 @@ function SkillBundleConfigCardWrapper(props: {
       }
       if (props.getOnlineUpdateLocked) {
         setOnlineUpdateLocked(props.getOnlineUpdateLocked());
-      }
-      if (props.getGatekeeperEnabled) {
-        setGatekeeperEnabled(props.getGatekeeperEnabled());
       }
     };
     syncState();
@@ -209,18 +173,6 @@ function SkillBundleConfigCardWrapper(props: {
     });
   } : undefined;
 
-  const onToggleGatekeeper = props.setGatekeeper ? (next: boolean) => {
-    setSavingGatekeeper(true);
-    setGatekeeperEnabled(next);
-    props.setGatekeeper!(next).catch(() => {
-      if (props.getGatekeeperEnabled) {
-        setGatekeeperEnabled(props.getGatekeeperEnabled());
-      }
-    }).finally(() => {
-      setSavingGatekeeper(false);
-    });
-  } : undefined;
-
   return h(SkillBundleConfigCard, {
     t: props.t,
     enabled,
@@ -230,14 +182,11 @@ function SkillBundleConfigCardWrapper(props: {
     onlineUpdateDisabled: savingUpdate || onlineUpdateLocked,
     onlineUpdateLocked,
     onToggleOnlineUpdate,
-    gatekeeperEnabled,
-    gatekeeperDisabled: savingGatekeeper,
-    onToggleGatekeeper,
   });
 }
 
 export interface SetupSidebarEntryOptions {
-  callApi: (path: "/sidebar-entry" | "/online-update" | "/gatekeeper", options?: RequestInit) => Promise<{ enabled: boolean; locked?: boolean }>;
+  callApi: (path: "/sidebar-entry" | "/online-update", options?: RequestInit) => Promise<{ enabled: boolean; locked?: boolean }>;
   headers: Record<string, string>;
   renderPanel: (ownerProps?: any) => React.ReactNode;
   ns: string;
@@ -250,8 +199,6 @@ export interface SidebarEntryController {
   setEnabled(enabled: boolean): Promise<boolean>;
   isOnlineUpdateEnabled(): boolean;
   setOnlineUpdate(enabled: boolean): Promise<boolean>;
-  isGatekeeperEnabled(): boolean;
-  setGatekeeper(enabled: boolean): Promise<boolean>;
   destroy(): void;
 }
 
@@ -267,8 +214,6 @@ export function setupSidebarEntry(
       setEnabled: async () => false,
       isOnlineUpdateEnabled: () => true,
       setOnlineUpdate: async () => false,
-      isGatekeeperEnabled: () => true,
-      setGatekeeper: async () => false,
       destroy: () => {},
     };
   }
@@ -420,41 +365,6 @@ export function setupSidebarEntry(
     })
     .catch(() => {});
 
-  // 守门人默认开（装了本插件就是这个语义）；读取服务端已保存的状态再覆盖默认值。
-  let gatekeeperEnabled = true;
-  let gatekeeperEpoch = 0;
-
-  const setGatekeeper = async (next: boolean): Promise<boolean> => {
-    if (destroyed) return gatekeeperEnabled;
-    const currentEpoch = ++gatekeeperEpoch;
-    gatekeeperEnabled = next;
-    notify();
-    try {
-      await callApi("/gatekeeper", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ enabled: next }),
-      });
-      return next;
-    } catch (err) {
-      if (currentEpoch === gatekeeperEpoch) {
-        gatekeeperEnabled = !next;
-        notify();
-      }
-      throw err;
-    }
-  };
-
-  const loadGatekeeperEpoch = gatekeeperEpoch;
-  callApi("/gatekeeper")
-    .then((res) => {
-      if (!destroyed && gatekeeperEpoch === loadGatekeeperEpoch && res && typeof res.enabled === "boolean") {
-        gatekeeperEnabled = res.enabled;
-        notify();
-      }
-    })
-    .catch(() => {});
-
   // 监听宿主 layout 服务
   if (typeof (ctx as any).inject === "function") {
     (ctx as any).inject(["layout"], (scoped: any) => {
@@ -485,8 +395,6 @@ export function setupSidebarEntry(
         getOnlineUpdateEnabled: () => onlineUpdateEnabled,
         setOnlineUpdate: setOnlineUpdate,
         getOnlineUpdateLocked: () => onlineUpdateLocked,
-        getGatekeeperEnabled: () => gatekeeperEnabled,
-        setGatekeeper: setGatekeeper,
         subscribe: (fn) => {
           listeners.add(fn);
           return () => { listeners.delete(fn); };
@@ -501,15 +409,12 @@ export function setupSidebarEntry(
     setEnabled,
     isOnlineUpdateEnabled: () => onlineUpdateEnabled,
     setOnlineUpdate,
-    isGatekeeperEnabled: () => gatekeeperEnabled,
-    setGatekeeper,
     destroy: () => {
       if (destroyed) return;
       // 让在途初始化请求和保存失败的回滚失效，避免卸载后重新注册或通知。
       destroyed = true;
       epoch++;
       updateEpoch++;
-      gatekeeperEpoch++;
       layoutService = undefined;
       listeners.clear();
       if (offRow) {

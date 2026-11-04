@@ -7,7 +7,7 @@ let state = [];
 const outerState = [], effects = [];
 let innerState = [], mountedKey, currentSession = "session-a";
 const react = {
-  createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity).filter((child) => child != null && typeof child !== "boolean") }),
+  createElement: (type, props, ...children) => ({ type, props: { ...props, children }, children: children.flat(Infinity).filter((child) => child != null && typeof child !== "boolean") }),
   useState(initial) { const index = cursor++, store = state; if (!(index in store)) store[index] = initial; return [store[index], (next) => { store[index] = typeof next === "function" ? next(store[index]) : next; }]; },
   useRef(value) { const index = cursor++; return state[index] || (state[index] = { current: value }); },
   useEffect(effect) { const index = cursor++; if (!(index in state)) { state[index] = true; effects.push(effect); } },
@@ -75,7 +75,7 @@ try {
     : { ids: [], byId: {} };
   function render() {
     state = outerState; cursor = 0;
-    const view = component({ t, useSessions: (selector) => selector(snapshotFor(currentSession)) });
+    const view = component({ t, onClose() {}, entry: { mode: "library" }, useSessions: (selector) => selector(snapshotFor(currentSession)) });
     if (mountedKey !== view.props.key) { mountedKey = view.props.key; innerState = []; }
     state = innerState; cursor = 0; tree = view.type(view.props);
   }
@@ -110,40 +110,73 @@ try {
     return [node, ...nested.flatMap((child) => nodes(child))];
   }
   const find = (predicate) => nodes().find(predicate);
-  const rows = () => nodes().filter((node) => node.props.className === "dssm-name").map((node) => node.children[0]);
+  const rows = () => nodes(nodes().find(n=>n.props["data-inventory-scope"] === "global") || tree).filter((node) => node.props.className === "dssm-name").map((node) => node.children[0]);
   const change = (label, value) => { find((node) => node.props["aria-label"] === label).props.onChange({ target: { value } }); render(); };
-  const tab = (name) => { const tabs = find((node) => node.props?.className === "dssm-scope-tabs" && Array.isArray(node.props.items)); const option = tabs.props.items.find((item) => item.label === name || (Array.isArray(item.label) && item.label.includes(name))); tabs.props.onChange(option.value); render(); };
+  const action = label => nodes().find(node => node.props.onClick && (node.children.includes(label) || node.props['aria-label'] === label));
+  const selectNavigation = (name) => {
+    const openLibrary = () => {
+      const back = action(t('library.back'));
+      if (back) back.props.onClick();
+      else {
+        const tabs = nodes().find(node => node.props.label === t('scope.label') && node.props.items?.some(item => item.value === 'library'));
+        assert.ok(tabs, '主导航提供技能库入口');
+        tabs.props.onChange('library');
+      }
+      render();
+    };
+    if (name === t('scope.user') || name === t('scope.project')) { openLibrary(); return; }
+    if (name === t('library.install')) {
+      openLibrary();
+      action(t('library.add')).props.onClick(); render();
+      action(t('library.git')).props.onClick(); render();
+      return;
+    }
+    if (!action(name)) openLibrary();
+    assert.ok(action(name), '必须找到导航操作：' + name);
+    action(name).props.onClick(); render();
+  };
+  const openCreate = async () => {
+    const add = action(t('library.add'));
+    assert.ok(add && !add.props.disabled, '技能库可打开添加技能');
+    add.props.onClick(); render();
+    const create = action(t('library.create'));
+    assert.ok(create && !create.props.disabled, '添加方式中可编写新技能');
+    create.props.onClick(); await new Promise(resolve => setImmediate(resolve)); render();
+  };
+
+  const tab = (name) => selectNavigation(name);
   render(); effects.splice(0).forEach((effect) => effect());
   await new Promise((resolve) => setImmediate(resolve)); render();
-  const groups = () => nodes().filter((node) => node.props.className === "dssm-source");
+  const groups = () => nodes(nodes().find(n=>n.props["data-inventory-scope"] === "global")).filter((node) => node.props.className === "dssm-source");
   const expandAll = () => { groups().forEach((node) => { const toggle = nodes(node).find((child) => child.props.className === "dssm-source-toggle"); if (toggle?.props["aria-expanded"] !== true) toggle.props.onClick(); }); render(); };
   assert.deepEqual(rows(), [], "来源默认折叠，不平铺所有技能");
   assert.equal(groups().length, 2, "全局按来源分组");
   assert.ok(nodes(groups()[0]).some((node) => node.children.includes("1 个技能")), "来源数量使用翻译文案");
   expandAll();
   assert.deepEqual(rows(), ["global-one", "global-two"]);
-  const states = nodes().filter((node) => node.props.className === "dssm-row-state");
+  // Inventory refresh keeps expanded content, immediately announces scanning, and counts globals.
+  const scanFetch=globalThis.fetch;let resolveScan,scanRequests=0;
+  globalThis.fetch=async(url,options)=>{if(String(url).endsWith('/state')){scanRequests++;return new Promise(resolve=>{resolveScan=resolve;});}return scanFetch(url,options);};
+  const scanControl=()=>action(t('btn.refresh'));
+  const firstScan=scanControl();assert.ok(firstScan);firstScan.props.onClick();firstScan.props.onClick();render();
+  assert.equal(scanRequests,1,'刷新进行中防止重复扫描');assert.equal(scanControl().props.disabled,true);
+  assert.ok(nodes().some(n=>n.props.role==='status'&&n.children.includes(t('library.scanning'))),'刷新立即显示扫描状态');
+  assert.deepEqual(rows(),['global-one','global-two'],'扫描时保留已展开库存，不闪烁替换列表');
+  resolveScan({ok:true,json:async()=>({data:sessionData({headers:{'x-dsh-skills-session':'session-a'}})})});await new Promise(resolve=>setImmediate(resolve));render();
+  assert.ok(nodes().some(n=>n.props.role==='status'&&n.children.includes(t('library.scanned',{count:2}))),'扫描完成数量只统计全局技能');assert.equal(scanControl().props.disabled,false);
+  globalThis.fetch=scanFetch;
+  const states = nodes(nodes().find(n=>n.props["data-inventory-scope"] === "global")).filter((node) => node.props.className === "dssm-row-state");
   assert.equal(states.length, 2, "每条技能都有独立状态操作组");
-  assert.ok(nodes(states[0]).some((node) => String(node.props.label || "").includes(t("skill.toggle"))), "开关和状态位于同一组");
-  const skillActions = nodes().filter((node) => node.props.className === "dssm-skill-actions");
+  assert.equal(nodes(states[0]).some((node) => String(node.props.label || "").includes(t("skill.toggle"))), false, "库存无技能启停开关");
+  const skillActions = nodes(nodes().find(n=>n.props["data-inventory-scope"] === "global")).filter((node) => node.props.className === "dssm-skill-actions");
   assert.equal(skillActions.length, 2, "每条技能的操作在同一组");
   assert.ok(skillActions.every((node) => node.children.at(-1)?.props?.className === "dssm-row-state"), "技能开关在行的最右边");
-  assert.equal(nodes().some((node) => node.props.className === "dssm-status dssm-enabled"), false, "启用状态由开关表示，不再重复文案");
+  assert.equal(nodes().some((node) => node.props.className === "dssm-status dssm-enabled"), true, "会话可用状态以只读图标显示");
   const more = find((node) => node.props["aria-label"] === t("btn.more"));
   assert.ok(more.props.options.some((option) => option.value === "detail"), "查看详情放进更多");
-  assert.ok(more.props.options.some((option) => option.value === "trash" && option.danger), "删除技能放进更多");
+  assert.equal(more.props.options.some(option => option.value === "trash"), false, "技能更多菜单不再暴露回收");
   assert.equal(nodes().some((node) => node.props["aria-label"] === t("btn.detail") && node.props.icon), false, "技能行不再单独放详情图标");
   assert.equal(nodes().some((node) => node.props["aria-label"] === t("btn.trash") && node.props.icon), false, "技能行不再单独放删除图标");
-  more.props.onChange({ target: { value: "trash" } }); render();
-  assert.ok(find((node) => node.props.title === t("confirm.trash.title")), "回收菜单仍先打开确认弹窗");
-  const trashDialog = find((node) => node.props.title === t("confirm.trash.title"));
-  assert.equal(trashDialog.props.description, t("confirm.trash.desc", { name: "global-one" }), "回收说明走宿主 description");
-  assert.equal(nodes(trashDialog).some((node) => node.props.className === "dssm-desc"), false, "确认说明不再塞进正文");
-  const trashConfirm = find((node) => node.children.includes(t("btn.trash")) && node.props.variant === "outline");
-    assert.ok(trashConfirm, "技能回收确认用 outline 按钮");
-    assert.equal(trashConfirm.props.className, "dssm-btn-danger", "文字确认对齐官方删除警告样式挂红色类");
-  assert.equal(find((node) => node.children.includes(t("btn.cancel")) && node.props.variant === "outline").props.className, undefined, "取消不套危险类");
-  find((node) => node.children.includes(t("btn.cancel"))).props.onClick(); render();
   more.props.onChange({ target: { value: "detail" } }); render();
   const detailDialog = find((node) => node.props.title === t("detail.title"));
   assert.ok(detailDialog, "详情菜单打开技能详情弹窗");
@@ -155,90 +188,16 @@ try {
   change(t("search"), "two");
   assert.deepEqual(rows(), ["global-two"]);
   let toggleRequest;
-  render();
-  assert.equal(find((node) => node.props.className === "dssm-scope-tabs").props.items.length, 5, "编组、仓库、回收站与两个技能视图同级");
-  data.trash.push(
-    { id: "trash-a", name: "removed-a", deletedAt: "2026-09-12T00:00:00Z", root: { scope: "project", projectName: "A" } },
-    { id: "trash-b", name: "removed-b", deletedAt: "2026-09-12T00:00:00Z", root: { scope: "user" } },
-  );
-  globalThis.fetch = async (url, options) => {
-    if (options?.method === "POST") {
-      toggleRequest = { url, body: JSON.parse(options.body) };
-      data.trash = data.trash.filter((item) => item.id !== toggleRequest.body.id);
-    }
-    return { ok: true, json: async () => ({ data: sessionData(options) }) };
-  };
-  render(); tab("回收站");
-  assert.deepEqual(rows(), ["removed-a", "removed-b"], "回收站直接展示全局和项目条目");
-  assert.equal(find((node) => node.props["aria-label"] === t("search")), undefined, "回收站不显示技能筛选");
-  assert.equal(find((node) => node.props.className === "dssm-summary"), undefined);
-  assert.equal(find((node) => node.children.includes(t("btn.create"))), undefined);
-  assert.equal(find((node) => node.props.role === "tabpanel").props["aria-labelledby"], "dssm-tab-trash");
-  const trashTab = find((node) => node.props.className === "dssm-scope-tabs").props.items.find((item) => item.value === "trash");
-  assert.equal([].concat(trashTab.label).find((node) => node?.props?.className === "dssm-trash-count").children[0], 2);
-  find((node) => node.props["aria-label"] === t("btn.restore")).props.onClick();
-  await new Promise((resolve) => setImmediate(resolve)); render();
-  assert.ok(toggleRequest.url.endsWith("/trash-restore"));
-  assert.deepEqual(toggleRequest.body, { id: "trash-a" });
-  assert.deepEqual(rows(), ["removed-b"]);
-  find((node) => node.props["aria-label"] === t("btn.delete.forever")).props.onClick(); render();
-  assert.ok(find((node) => node.props.title === t("confirm.delete.title")), "永久删除仍需确认");
-  find((node) => node.children.includes(t("btn.cancel"))).props.onClick(); render();
-  assert.equal(find((node) => node.props.title === t("confirm.delete.title")), undefined, "取消后留在回收站 Tab");
-  assert.deepEqual(rows(), ["removed-b"]);
-  find((node) => node.props["aria-label"] === t("btn.delete.forever")).props.onClick(); render();
-  nodes().filter((node) => node.children.includes(t("btn.delete.forever"))).at(-1).props.onClick();
-  await new Promise((resolve) => setImmediate(resolve)); render();
-  assert.ok(toggleRequest.url.endsWith("/trash-delete"));
-  assert.deepEqual(toggleRequest.body, { id: "trash-b" });
-  assert.equal(find((node) => node.props.title === t("confirm.delete.title")), undefined);
-  assert.ok(find((node) => node.props.className === "dssm-empty" && node.children.includes(t("trash.empty"))));
-  assert.equal(find((node) => node.props.className === "dssm-trash-count"), undefined, "空回收站不显示数量徽标");
-  tab("全局技能");
-  assert.deepEqual(rows(), ["global-two"], "经过回收站仍保留全局筛选");
-  const create = find((node) => node.props["aria-label"] === t("btn.create"));
-  assert.equal(create.props.disabled, false, "全局页可创建技能");
-  create.props.onClick(); await new Promise((resolve) => setImmediate(resolve)); render();
-  assert.ok(find((node) => node.props["aria-label"] === t("dest.scope")), "创建弹窗使用共用的范围选择器");
-  assert.equal(find((node) => node.props["aria-label"] === t("dest.workspace")), undefined, "默认用户目录，不出现工作区下拉");
-  const locationFixture = () => find((node) => node.props["aria-label"] === t("dest.location"));
-  assert.deepEqual(locationFixture().props.options.map((o) => [o.value, o.disabled === true]), [["dsh", false], ["agents", false]], "创建开放 Shared Agent，位置是下拉");
-  assert.ok(nodes().some((node) => node.type === "code" && node.children.includes("C:/u/.dsh/skills")), "路径只显示所选位置的后端校验路径");
-  assert.equal(nodes().some((node) => node.type === "input" && node.props.type === "radio"), false, "不再使用单选框");
-  for (const [key, value] of [["name", "new-global"], ["description", "description"], ["body", "body"]]) {
-    find((node) => node.props.placeholder === t("create." + key + ".placeholder")).props.onChange({ target: { value } }); render();
-  }
-  nodes().filter((node) => node.children.includes(t("btn.create.now"))).at(-1).props.onClick();
-  await new Promise((resolve) => setImmediate(resolve)); render();
-  assert.ok(toggleRequest.url.endsWith("/create"));
-  assert.equal(toggleRequest.body.root, "dsh", "默认仍提交全局 DSH");
-  assert.equal("workspace" in toggleRequest.body, false, "用户目录不带 workspace");
-  create.props.onClick(); await new Promise((resolve) => setImmediate(resolve)); render();
-  locationFixture().props.onChange({ target: { value: "agents" } }); render();
-  assert.ok(nodes().some((node) => node.type === "code" && node.children.includes("C:/u/.agents/skills")), "切到 Shared Agent 后路径跟着变");
-  for (const [key, value] of [["name", "new-agents"], ["description", "description"], ["body", "body"]]) {
-    find((node) => node.props.placeholder === t("create." + key + ".placeholder")).props.onChange({ target: { value } }); render();
-  }
-  nodes().filter((node) => node.children.includes(t("btn.create.now"))).at(-1).props.onClick();
-  await new Promise((resolve) => setImmediate(resolve)); render();
-  assert.equal(toggleRequest.body.root, "agents", "选 Shared Agent 提交 root=agents");
-  assert.equal("workspace" in toggleRequest.body, false);
-  create.props.onClick(); await new Promise((resolve) => setImmediate(resolve)); render();
-  find((node) => node.props["aria-label"] === t("dest.scope")).props.onChange({ target: { value: "workspace" } }); render();
-  assert.equal(nodes().filter((node) => node.children.includes(t("btn.create.now"))).at(-1).props.disabled, true, "这个夹具没有工作区列表，切到工作区后不能创建");
-  await selectSession(undefined);
-  assert.equal(find((node) => node.props.title === t("create.title")), undefined, "会话切换关闭旧创建表单");
-  let resolveOld;
-  globalThis.fetch = async (_, options) => {
-    const snapshot = { data: sessionData(options) };
-    if (options?.headers?.["x-dsh-skills-session"] === "session-a") await new Promise((resolve) => { resolveOld = resolve; });
-    return { ok: true, json: async () => snapshot };
-  };
-  await selectSession("session-a");
-  await selectSession("session-b");
-  resolveOld(); await new Promise((resolve) => setImmediate(resolve)); render();
-  assert.ok(find((node) => node.props.className === "dssm-source"), "旧会话的慢响应不会让页面崩溃");
-  console.log("全局页 Tab、筛选记忆、会话重挂载和创建目标交互回归通过");
+  assert.equal(find(node => node.props['aria-label'] === t('filter.workspace')), undefined);
+  assert.equal(nodes().some(node => node.props['data-inventory-scope'] === 'project'), false);
+  assert.equal(find(node => node.props['aria-label'] === t('trash.title') || node.props['aria-label'] === t('btn.create')), undefined);
+  const globalFilter = find(node => node.props['aria-label'] === t('search'));
+  assert.ok(globalFilter);
+  await selectSession('session-b'); expandAll();
+  assert.equal(rows().some(name => name.startsWith('project-')), false, 'composer session changes do not expose project inventory');
+  await selectSession(undefined); expandAll();
+  assert.ok(rows().length > 0, 'global inventory remains usable without a session');
+  console.log('全局筛选与会话重挂载边界通过');
 
   outerState.length = 0;
   innerState = [];
@@ -368,7 +327,7 @@ try {
   render();
   assert.ok(removeRequest && removeRequest.body.id === "custom:xhs", "发起移除自定义来源请求");
   assert.ok(find((node) => node.props["aria-label"] === t("rootPath.source")), "移除登记后不关闭弹窗");
-  assert.ok(find((node) => typeof node.props.title === "string" && node.props.title.includes("技能目录")), "移除后弹窗切换到剩余有效来源");
+  assert.equal(find(node => node.props['aria-label'] === t('rootPath.source')).props.options.some(option => option.value === 'custom:xhs'), false, "移除后弹窗只提供剩余有效来源");
 
   console.log("自定义技能目录弹窗通过");
 } finally {

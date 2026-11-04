@@ -25,7 +25,7 @@ assert.equal(handleSourceMenuEscape({
 }, () => escapeCalls.push("close")), false, "其它按键不关闭菜单");
 
 const source = await readFile(new URL("../src/client.ts", import.meta.url), "utf8");
-assert.ok(source.includes('className: "dssm-search"'), "搜索框使用 Ant Design 输入框");
+assert.match(source, /h\(Input,\s*\{className:\s*['"]dssm-search['"]/, "搜索框使用宿主输入控件");
 assert.ok(!source.includes('h("input", { className: "dssm-control'), "可见文本输入不能继续使用自定义控件");
 assert.ok(!source.includes("dssm-fallback-switch"), "开关不再保留自绘兜底");
 assert.ok(!source.includes("dssm-host-modal"), "弹窗不再套一层自绘外壳");

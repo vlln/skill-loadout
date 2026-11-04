@@ -20,6 +20,7 @@ const KEBAB_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const EXTERNAL_SOURCE_ORDER = [
   "ccswitch",
   "codex",
+  "codexSystem",
   "claude",
   "gemini",
   "opencode",
@@ -148,7 +149,7 @@ function userRoots() {
     {
       key: "codex",
       path: join(
-        process.env.DSH_CODEX_HOME || join(homedir(), ".codex"),
+        process.env.DSH_CODEX_HOME || process.env.CODEX_HOME || join(homedir(), ".codex"),
         "skills"
       ),
       label: "Codex",
@@ -159,7 +160,7 @@ function userRoots() {
     {
       key: "claude",
       path: join(
-        process.env.DSH_CLAUDE_HOME || join(homedir(), ".claude"),
+        process.env.DSH_CLAUDE_HOME || process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"),
         "skills"
       ),
       label: "Claude Code",
@@ -354,6 +355,14 @@ function userRoots() {
     root.defaultPath = root.path;
     root.path = override;
   }
+  roots.push({
+    key: "codexSystem",
+    path: join(roots.find((root) => root.key === "codex").path, ".system"),
+    label: "Codex bundled",
+    mutable: false,
+    toggleable: true,
+    native: false
+  });
   for (const custom of loadRootPathConfig().customSources) {
     roots.push({
       key: custom.id,
@@ -553,7 +562,7 @@ function logPath() {
 }
 const ROOTS_CONFIG_VERSION = 1;
 const MAX_ROOT_PATH_LENGTH = 1024;
-const OVERRIDABLE_ROOT_KEYS = new Set(EXTERNAL_SOURCE_ORDER);
+const OVERRIDABLE_ROOT_KEYS = new Set(EXTERNAL_SOURCE_ORDER.filter((key) => key !== "codexSystem"));
 let rootPathConfig = null;
 function rootPathConfigPath() {
   return join(managerHomePath(), "roots.json");
@@ -1675,7 +1684,7 @@ function defaultManagerState() {
     disabledSkills[root.key] = [];
     enabledSkills[root.key] = [];
   }
-  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: /* @__PURE__ */ Object.create(null), categoryMembers: /* @__PURE__ */ Object.create(null), categoryOrder: /* @__PURE__ */ Object.create(null), customNotes: /* @__PURE__ */ Object.create(null), loadouts: [], activeLoadout: /* @__PURE__ */ Object.create(null), sessionLoadouts: /* @__PURE__ */ Object.create(null), gatekeeper: true };
+  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: /* @__PURE__ */ Object.create(null), categoryMembers: /* @__PURE__ */ Object.create(null), categoryOrder: /* @__PURE__ */ Object.create(null), customNotes: /* @__PURE__ */ Object.create(null), loadouts: [], activeLoadout: /* @__PURE__ */ Object.create(null), sessionLoadouts: /* @__PURE__ */ Object.create(null), defaultLoadoutIds: [], gatekeeper: true };
 }
 function validStateSkillName(name) {
   return validDiscoveryName(name);
@@ -1735,43 +1744,24 @@ function validSessionId(value) {
 function validSessionLoadouts(value) {
   if (value === void 0) return true;
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  for (const id of Object.values(value)) {
-    if (typeof id !== "string") return false;
-    if (id !== "" && !LOADOUT_ID_RE.test(id)) return false;
+  for (const selection of Object.values(value)) {
+    if (typeof selection === "string") {
+      if (selection !== "" && !LOADOUT_ID_RE.test(selection)) return false;
+    } else if (!Array.isArray(selection) || selection.some((id) => typeof id !== "string" || !LOADOUT_ID_RE.test(id))) return false;
   }
   return true;
 }
 function validManagerStateDocument(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || value.version !== 1)
     return false;
-  if (!value.sources || typeof value.sources !== "object" || Array.isArray(value.sources))
-    return false;
-  if (!validPolicyLists(value.disabledSkills) || !validPolicyLists(value.enabledSkills, true))
-    return false;
   if (value.sidebarEntry !== void 0 && typeof value.sidebarEntry !== "boolean") return false;
   if (value.onlineUpdate !== void 0 && typeof value.onlineUpdate !== "boolean") return false;
-  if (value.gatekeeper !== void 0 && typeof value.gatekeeper !== "boolean") return false;
-  for (const root of userRoots()) {
-    if (root.key === "dsh") {
-      if (value.sources.dsh !== void 0 && typeof value.sources.dsh !== "boolean") return false;
-      continue;
+  if (value.defaultLoadoutIds !== void 0 && (!Array.isArray(value.defaultLoadoutIds) || value.defaultLoadoutIds.some((id) => typeof id !== "string" || !LOADOUT_ID_RE.test(id)))) return false;
+  if (value.sessionExcludedSkills !== void 0) {
+    if (!value.sessionExcludedSkills || typeof value.sessionExcludedSkills !== "object" || Array.isArray(value.sessionExcludedSkills)) return false;
+    for (const [sessionId, members] of Object.entries(value.sessionExcludedSkills)) {
+      if (!validSessionId(sessionId) || !Array.isArray(members) || members.some((member) => !validMemberReference(member))) return false;
     }
-    if (typeof value.sources[root.key] !== "boolean") return false;
-    const list = value.disabledSkills[root.key];
-    if (!Array.isArray(list) || list.some((name) => !validStateSkillName(name)))
-      return false;
-  }
-  for (const [key, flag] of Object.entries(value.sources)) {
-    if (PROJECT_ROOT_KEY_RE.test(key) && typeof flag !== "boolean") return false;
-  }
-  const enabledSkills = value.enabledSkills || {};
-  for (const key of /* @__PURE__ */ new Set([
-    ...Object.keys(value.disabledSkills),
-    ...Object.keys(enabledSkills)
-  ])) {
-    const disabled = new Set(value.disabledSkills[key] || []);
-    if ((enabledSkills[key] || []).some((name) => disabled.has(name)))
-      return false;
   }
   if (value.customNotes !== void 0) {
     if (!value.customNotes || typeof value.customNotes !== "object" || Array.isArray(value.customNotes)) return false;
@@ -1818,44 +1808,18 @@ function normalizeManagerState(value) {
   if (typeof value.gatekeeper === "boolean") {
     normalized.gatekeeper = value.gatekeeper;
   }
-  for (const root of userRoots()) {
-    if (value.sources && typeof value.sources[root.key] === "boolean")
-      normalized.sources[root.key] = value.sources[root.key];
-    const list = value.disabledSkills && value.disabledSkills[root.key];
-    if (Array.isArray(list))
-      normalized.disabledSkills[root.key] = [
-        ...new Set(list.filter((name) => validStateSkillName(name)))
-      ].sort();
-    const enabled = value.enabledSkills && value.enabledSkills[root.key];
-    if (Array.isArray(enabled))
-      normalized.enabledSkills[root.key] = [
-        ...new Set(enabled.filter((name) => validStateSkillName(name)))
-      ].sort();
-  }
-  if (value.sources && typeof value.sources === "object" && !Array.isArray(value.sources)) {
-    for (const [key, flag] of Object.entries(value.sources)) {
-      if (PROJECT_ROOT_KEY_RE.test(key) && !key.startsWith("project-dsh:") && typeof flag === "boolean")
-        normalized.sources[key] = flag;
-    }
-  }
-  for (const field of ["disabledSkills", "enabledSkills"]) {
-    const source = value[field];
-    if (source && typeof source === "object" && !Array.isArray(source)) {
-      for (const [key, list] of Object.entries(source)) {
-        if (!PROJECT_ROOT_KEY_RE.test(key) || !Array.isArray(list)) continue;
-        normalized[field][key] = [
-          ...new Set(list.filter(validStateSkillName))
-        ].sort();
-      }
-    }
+  for (const field of ["sources", "disabledSkills", "enabledSkills", "activeLoadout", "gatekeeper", "disabledRoots"]) {
+    if (Object.prototype.hasOwnProperty.call(value, field))
+      normalized[field] = structuredClone(value[field]);
   }
   normalized.categories = normalizeCategories(value.categories);
   normalized.categoryMembers = normalizeCategoryMembers(value.categoryMembers, normalized.categories);
   normalized.categoryOrder = normalizeCategoryOrder(value.categoryOrder, normalized.categories);
   normalized.customNotes = normalizeCustomNotes(value.customNotes);
   normalized.loadouts = normalizeLoadouts(value.loadouts);
-  normalized.activeLoadout = normalizeActiveLoadout(value.activeLoadout, normalized.loadouts);
+  normalized.defaultLoadoutIds = [...new Set((value.defaultLoadoutIds || []).filter((id) => normalized.loadouts.some((loadout) => loadout.id === id)))];
   normalized.sessionLoadouts = normalizeSessionLoadouts(value.sessionLoadouts, normalized.loadouts);
+  normalized.sessionExcludedSkills = structuredClone(value.sessionExcludedSkills || {});
   return normalized;
 }
 const CATEGORY_NAME_MAX = 24;
@@ -1967,20 +1931,21 @@ function normalizeActiveLoadout(value, loadouts) {
 function normalizeSessionLoadouts(value, loadouts) {
   const overrides = /* @__PURE__ */ Object.create(null);
   if (!value || typeof value !== "object" || Array.isArray(value)) return overrides;
-  const known = new Set(loadouts.map((item) => item.id));
   for (const [session, id] of Object.entries(value)) {
-    if (!validSessionId(session) || typeof id !== "string") continue;
-    if (id === "" || known.has(id)) overrides[session] = id;
+    if (!validSessionId(session)) continue;
+    if (typeof id === "string" && (id === "" || LOADOUT_ID_RE.test(id))) overrides[session] = id;
+    else if (Array.isArray(id) && id.every((item) => typeof item === "string" && LOADOUT_ID_RE.test(item))) overrides[session] = [...new Set(id)];
   }
   return overrides;
 }
 async function readManagerState() {
   try {
     const raw = await fs.readFile(managerStatePath(), "utf8");
-    const parsed = migrateManagerStateDocument(JSON.parse(raw));
-    if (!validManagerStateDocument(parsed))
+    const parsed = JSON.parse(raw);
+    const validation = migrateManagerStateDocument(structuredClone(parsed));
+    if (!validManagerStateDocument(validation))
       throw codedError("invalid manager state schema", "error.state.invalid");
-    const loadoutWarning = validLoadouts(parsed.loadouts) && validActiveLoadout(parsed.activeLoadout) && validSessionLoadouts(parsed.sessionLoadouts) ? null : {
+    const loadoutWarning = validLoadouts(parsed.loadouts) && validSessionLoadouts(parsed.sessionLoadouts) ? null : {
       code: "warning.loadout.invalid",
       params: { path: managerStatePath() },
       error: `loadout \u7F16\u7EC4\u6570\u636E\u65E0\u6548\uFF0C\u5DF2\u4E22\u5F03\u8BE5\u6BB5: ${managerStatePath()}`
@@ -2013,20 +1978,6 @@ async function writeManagerState(value) {
 `
   );
 }
-function managerSkillOverride(policy, rootKey, name, policyAliases = []) {
-  if ((policy.enabledSkills[rootKey] || []).includes(name)) return true;
-  if ((policy.disabledSkills[rootKey] || []).includes(name)) return false;
-  let inheritedEnable = false;
-  for (const alias of policyAliases) {
-    if (alias.rootKey === rootKey && alias.name === name) continue;
-    if ((policy.disabledSkills[alias.rootKey] || []).includes(alias.name))
-      return false;
-    if ((policy.enabledSkills[alias.rootKey] || []).includes(alias.name))
-      inheritedEnable = true;
-  }
-  if (inheritedEnable) return true;
-  return void 0;
-}
 function resolveActiveLoadout(state2, scopeKey) {
   const key = typeof scopeKey === "string" && scopeKey ? scopeKey : "user";
   const id = state2.activeLoadout && typeof state2.activeLoadout === "object" && !Array.isArray(state2.activeLoadout) ? state2.activeLoadout[key] : void 0;
@@ -2034,71 +1985,98 @@ function resolveActiveLoadout(state2, scopeKey) {
   const loadouts = Array.isArray(state2.loadouts) ? state2.loadouts : [];
   return loadouts.find((item) => item.id === id) || null;
 }
+function storedSessionLoadouts(state2, sessionId) {
+  if (!validSessionId(sessionId)) return [];
+  const selections = state2.sessionLoadouts;
+  if (!selections || typeof selections !== "object" || !Object.prototype.hasOwnProperty.call(selections, sessionId)) return [];
+  const stored = selections[sessionId];
+  if (typeof stored === "string") return stored && LOADOUT_ID_RE.test(stored) ? [stored] : [];
+  return Array.isArray(stored) ? [...new Set(stored.filter((id) => typeof id === "string" && LOADOUT_ID_RE.test(id)))] : [];
+}
 function storedSessionLoadout(state2, sessionId) {
-  if (!validSessionId(sessionId)) return void 0;
-  const overrides = state2.sessionLoadouts;
-  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return void 0;
-  return Object.prototype.hasOwnProperty.call(overrides, sessionId) ? overrides[sessionId] : void 0;
+  const ids = storedSessionLoadouts(state2, sessionId);
+  return ids.length === 1 ? ids[0] : void 0;
 }
 function resolveEffectiveLoadout(state2, scopeKey, sessionId) {
-  const stored = storedSessionLoadout(state2, sessionId);
-  if (stored !== void 0) {
-    if (stored === "") return { loadout: null, source: "none", loadoutId: null, explicitNone: true };
-    const loadouts = Array.isArray(state2.loadouts) ? state2.loadouts : [];
-    const loadout = loadouts.find((item) => item.id === stored);
-    if (loadout) return { loadout, source: "session", loadoutId: loadout.id, explicitNone: false };
-  }
-  const active = resolveActiveLoadout(state2, scopeKey);
-  if (active) return { loadout: active, source: "scope", loadoutId: active.id, explicitNone: false };
-  return { loadout: null, source: "none", loadoutId: null, explicitNone: false };
+  const ids = storedSessionLoadouts(state2, sessionId);
+  const definitions = Array.isArray(state2.loadouts) ? state2.loadouts : [];
+  const loadouts = ids.flatMap((id) => {
+    const loadout2 = definitions.find((item) => item.id === id);
+    return loadout2 ? [loadout2] : [];
+  });
+  const loadout = loadouts.length === 1 ? loadouts[0] : null;
+  return {
+    loadouts,
+    loadout,
+    loadoutIds: loadouts.map((item) => item.id),
+    loadoutId: loadout?.id || null,
+    source: loadouts.length ? "session" : "none",
+    explicitNone: validSessionId(sessionId) && !ids.length && Object.prototype.hasOwnProperty.call(state2.sessionLoadouts || {}, sessionId)
+  };
 }
 function gatekeeperMember(active, root, entry) {
   if (!active) return false;
   for (const member of active.members) {
+    if (PROJECT_ROOT_KEY_RE.test(member.root)) continue;
     if (member.root === root.key && member.name === entry.name) return true;
     if ((entry.policyAliases || []).some((alias) => alias.rootKey === member.root && alias.name === member.name)) return true;
   }
   return false;
 }
+function validMemberReference(member) {
+  if (!member || typeof member !== "object" || Array.isArray(member)) return false;
+  const ref = member;
+  return typeof ref.root === "string" && ref.root.length > 0 && validStateSkillName(ref.name);
+}
+function sessionExcludedSkills(state2, sessionId) {
+  return validSessionId(sessionId) && Array.isArray(state2.sessionExcludedSkills?.[sessionId]) ? state2.sessionExcludedSkills[sessionId].map((member) => ({ ...member })) : [];
+}
+function matchesReference(member, root, entry) {
+  return member.root === root.key && member.name === entry.name || (entry.policyAliases || []).some((alias) => alias.rootKey === member.root && alias.name === member.name);
+}
+function projectDefault(root, entry) {
+  return root.scope === "project" || (entry.policyAliases || []).some((alias) => PROJECT_ROOT_KEY_RE.test(alias.rootKey));
+}
+async function setSessionSkillExclusions(sessionId, excludedSkills, log, options = {}) {
+  const session = typeof sessionId === "string" ? sessionId.trim() : "";
+  if (!validSessionId(session)) return loadoutError("error.session.invalid", "Invalid session id", { sessionId: session });
+  if (!Array.isArray(excludedSkills) || excludedSkills.some((member) => !validMemberReference(member)))
+    return loadoutError("error.proto.invalidParams", "excludedSkills must contain root/name references");
+  const current = await readManagerState();
+  if (!current.writable) return invalidManagerStateWrite();
+  const retained = sessionExcludedSkills(current.state, session);
+  const selected = resolveEffectiveLoadout(current.state, "user", session).loadouts.flatMap((loadout) => loadout.members);
+  const { items } = await providerItems({ ...options, sessionId: session }, current);
+  const next = [];
+  for (const member of excludedSkills) {
+    const known = [...retained, ...selected].some((item) => item.root === member.root && item.name === member.name) || items.some(({ root, entry }) => matchesReference(member, root, entry));
+    if (!known) return loadoutError("error.skill.notFound", "Skill is not in this session's inventory or selected groups", { name: member.name });
+    if (!next.some((item) => item.root === member.root && item.name === member.name)) next.push({ root: member.root, name: member.name });
+  }
+  current.state.sessionExcludedSkills ||= /* @__PURE__ */ Object.create(null);
+  current.state.sessionExcludedSkills[session] = next;
+  await writeManagerState(current.state);
+  if (log) log("session-skill-exclusions", { sessionId: session, excludedSkills: next });
+  return { sessionId: session, excludedSkills: next };
+}
 function effectiveSkillPolicy(policyResult, root, entry, scopeKey = "user", sessionId) {
-  const override = managerSkillOverride(
-    policyResult.state,
-    root.key,
-    entry.name,
-    entry.policyAliases
-  );
-  const sourceEnabled = root.kind === "project-dsh" || policyResult.state.sources[root.key] !== false;
-  if (policyResult.writable === false || !sourceEnabled || override === false) {
-    return {
-      override,
-      sourceEnabled,
-      modelInvocable: false,
-      userInvocable: false,
-      enabled: false
-    };
-  }
-  if (policyResult.state.gatekeeper !== false && override !== true) {
-    const active = resolveEffectiveLoadout(policyResult.state, scopeKey, sessionId).loadout;
-    if (!gatekeeperMember(active, root, entry)) {
-      return {
-        override,
-        sourceEnabled,
-        modelInvocable: false,
-        userInvocable: false,
-        enabled: false,
-        gated: true
-      };
-    }
-  }
-  const modelInvocable = entry.invocationPolicyValid ? entry.modelInvocable : true;
-  const userInvocable = entry.invocationPolicyValid ? entry.userInvocable : true;
+  const active = resolveEffectiveLoadout(policyResult.state, scopeKey, sessionId).loadouts;
+  const member = validSessionId(sessionId) && projectDefault(root, entry) || active.some((loadout) => gatekeeperMember(loadout, root, entry));
+  const excluded = sessionExcludedSkills(policyResult.state, sessionId).some((ref) => matchesReference(ref, root, entry));
+  const safe = policyResult.writable !== false && !excluded && entry.loadable && entry.invocationPolicyValid;
+  const modelInvocable = !!(safe && member && entry.modelInvocable);
+  const userInvocable = !!(safe && member && entry.userInvocable);
   return {
-    override,
-    sourceEnabled,
+    sourceEnabled: true,
     modelInvocable,
     userInvocable,
-    enabled: true
+    enabled: modelInvocable || userInvocable,
+    ...excluded ? { excluded: true } : {},
+    ...!member ? { gated: true } : {}
   };
+}
+function legacyPolicyError() {
+  return { ok: false, code: "error.policy.sessionOnly", error: "Legacy loading policy is read-only. Edit a loadout and select it for a session instead." };
 }
 function invalidManagerStateWrite() {
   return {
@@ -2141,182 +2119,20 @@ async function setOnlineUpdate(enabled) {
   return enabled;
 }
 async function getGatekeeper() {
-  const current = await readManagerState();
-  return current.state.gatekeeper !== false;
+  return true;
 }
 async function setGatekeeper(enabled) {
-  if (typeof enabled !== "boolean") {
-    throw codedError("gatekeeper must be a boolean", "error.proto.invalidParams");
-  }
-  const current = await readManagerState();
-  if (current.writable === false) {
-    throw codedError("manager state file is read-only", "error.state.invalid");
-  }
-  current.state.gatekeeper = enabled;
-  await writeManagerState(current.state);
-  return enabled;
+  throw Object.assign(new Error(legacyPolicyError().error), { code: "error.policy.sessionOnly", statusCode: 400 });
 }
 async function setSourceEnabled(key, enabled, log, options = {}) {
-  let root = rootByKey(key);
-  if (!root && PROJECT_ROOT_KEY_RE.test(key) && !key.startsWith("project-dsh:"))
-    root = (await projectRoots(options.projectCwds)).find((item) => item.key === key);
-  if (!root || root.kind === "project-dsh" || !root.toggleable)
-    return readonlyError("toggle");
-  const current = await readManagerState();
-  if (current.writable === false) return invalidManagerStateWrite();
-  current.state.sources[root.key] = enabled === true;
-  await writeManagerState(current.state);
-  if (log)
-    log(
-      enabled ? "source-enable" : "source-disable",
-      `${enabled ? "\u542F\u7528" : "\u505C\u7528"}\u6765\u6E90 ${root.key}: ${root.path}`
-    );
-  return { root: root.key, enabled: enabled === true };
-}
-async function checkedPolicyRootDefinition(root) {
-  const definition = rootDefinition(root);
-  if (!definition || !definition.toggleable) return null;
-  if (definition.scope !== "project") {
-    const canonical = rootByKey(definition.key);
-    return canonical && resolve(canonical.path) === resolve(definition.path) ? canonical : null;
-  }
-  const source = projectSourceDefinition(definition.kind);
-  const validProjectRoot = source && PROJECT_ROOT_KEY_RE.test(definition.key) && typeof definition.projectRoot === "string" && isAbsolute(definition.projectRoot) && definition.key === `${definition.kind}:${projectIdentity(definition.projectRoot)}` && resolve(definition.path) === resolve(
-    join(
-      definition.projectRoot,
-      source.directory,
-      "skills"
-    )
-  );
-  if (!validProjectRoot) return null;
-  if (!await projectSourceSafe(definition)) {
-    return {
-      ok: false,
-      error: `\u9879\u76EE\u6280\u80FD\u76EE\u5F55\u4E0D\u5B89\u5168\uFF0C\u62D2\u7EDD\u5199\u5165\u72B6\u6001: ${definition.path}`,
-      code: "error.root.unsafe",
-      params: { path: definition.path }
-    };
-  }
-  return definition;
-}
-async function applyPolicySkillEnabled(definition, name, enabled, state2) {
-  const resolved = await resolveEntry(definition, name);
-  if (resolved === null) {
-    const explicitlyEnabled2 = new Set(state2.enabledSkills[definition.key] || []);
-    if (!enabled && explicitlyEnabled2.has(name)) {
-      explicitlyEnabled2.delete(name);
-      state2.enabledSkills[definition.key] = [...explicitlyEnabled2].sort();
-      return { root: definition.key, name, enabled: false };
-    }
-    return {
-      ok: false,
-      error: `\u6280\u80FD\u4E0D\u5B58\u5728: ${name}`,
-      code: "error.skill.notFound",
-      params: { name }
-    };
-  }
-  let summary;
-  try {
-    summary = entryOf(
-      name,
-      resolved.kind,
-      resolved.docPath,
-      parseSkillDoc(
-        await fs.readFile(resolved.realDocPath || resolved.docPath, "utf8")
-      )
-    );
-  } catch {
-    const explicitlyEnabled2 = new Set(state2.enabledSkills[definition.key] || []);
-    if (!enabled && explicitlyEnabled2.has(name)) {
-      explicitlyEnabled2.delete(name);
-      state2.enabledSkills[definition.key] = [...explicitlyEnabled2].sort();
-      return { root: definition.key, name, enabled: false };
-    }
-    return {
-      ok: false,
-      error: `\u6280\u80FD\u4E0D\u5B58\u5728: ${name}`,
-      code: "error.skill.notFound",
-      params: { name }
-    };
-  }
-  const explicitlyEnabled = new Set(state2.enabledSkills[definition.key] || []);
-  const explicitlyDisabled = new Set(state2.disabledSkills[definition.key] || []);
-  const isAlreadyEnabled = explicitlyEnabled.has(name);
-  const isAlreadyDisabled = explicitlyDisabled.has(name);
-  if (!enabled && isAlreadyDisabled) {
-    return { root: definition.key, name, enabled: false };
-  }
-  if (!summary.hasFrontmatter && (enabled || !isAlreadyEnabled)) {
-    return {
-      ok: false,
-      error: `\u6280\u80FD\u7F3A\u5C11\u5B8C\u6574 frontmatter\uFF0C\u65E0\u6CD5${enabled ? "\u542F\u7528" : "\u505C\u7528"}: ${name}`,
-      code: "error.skill.noFrontmatter",
-      params: { name, action: enabled ? "enable" : "disable" }
-    };
-  }
-  if (!summary.loadable && (enabled || !isAlreadyEnabled)) {
-    return {
-      ok: false,
-      error: `\u6280\u80FD\u7ED3\u6784\u4E0D\u5B8C\u6574\uFF0C\u65E0\u6CD5${enabled ? "\u542F\u7528" : "\u505C\u7528"}: ${name}`,
-      code: "error.skill.notLoadable",
-      params: { name, action: enabled ? "enable" : "disable" }
-    };
-  }
-  const disabled = explicitlyDisabled;
-  if (enabled) {
-    disabled.delete(name);
-    explicitlyEnabled.add(name);
-  } else {
-    explicitlyEnabled.delete(name);
-    disabled.add(name);
-  }
-  state2.disabledSkills[definition.key] = [...disabled].sort();
-  state2.enabledSkills[definition.key] = [...explicitlyEnabled].sort();
-  return { root: definition.key, name, enabled: enabled === true };
-}
-async function setPolicySkillEnabled(root, name, enabled, log) {
-  const definition = await checkedPolicyRootDefinition(root);
-  if (definition && definition.ok === false) return definition;
-  if (!definition) return readonlyError("toggle");
-  const current = await readManagerState();
-  if (current.writable === false) return invalidManagerStateWrite();
-  const result = await applyPolicySkillEnabled(definition, name, enabled, current.state);
-  if (result && result.ok === false) return result;
-  await writeManagerState(current.state);
-  if (log)
-    log(
-      enabled ? "policy-enable" : "policy-disable",
-      `${enabled ? "\u542F\u7528" : "\u505C\u7528"} ${definition.key}/${name}\uFF08\u672C\u5730\u7B56\u7565\uFF0C\u6E90\u6587\u4EF6\u4E0D\u53D8\uFF09`
-    );
-  return result;
+  return legacyPolicyError();
 }
 async function setSkillEnabled(root, name, enabled, log) {
-  return setPolicySkillEnabled(root, name, enabled, log);
+  if (enabled === true) return { name, inventoryOnly: true };
+  return legacyPolicyError();
 }
 async function setSkillReferenced(root, name, referenced, log) {
-  const definition = await checkedPolicyRootDefinition(root);
-  if (definition && definition.ok === false) return definition;
-  if (!definition) return readonlyError("toggle");
-  const current = await readManagerState();
-  if (current.writable === false) return invalidManagerStateWrite();
-  if (referenced) {
-    const result = await applyPolicySkillEnabled(definition, name, true, current.state);
-    if (result && result.ok === false) return result;
-    await writeManagerState(current.state);
-    if (log)
-      log("policy-enable", `\u5F15\u7528 ${definition.key}/${name}\uFF08\u672C\u5730\u7B56\u7565\uFF0C\u6E90\u6587\u4EF6\u4E0D\u53D8\uFF09`);
-    return result;
-  }
-  const listed = new Set(current.state.enabledSkills[definition.key] || []);
-  if (!listed.has(name)) {
-    return { root: definition.key, name, enabled: false };
-  }
-  listed.delete(name);
-  current.state.enabledSkills[definition.key] = [...listed].sort();
-  await writeManagerState(current.state);
-  if (log)
-    log("policy-disable", `\u53D6\u6D88\u5F15\u7528 ${definition.key}/${name}\uFF08\u672C\u5730\u7B56\u7565\uFF0C\u6E90\u6587\u4EF6\u4E0D\u53D8\uFF09`);
-  return { root: definition.key, name, enabled: false };
+  return legacyPolicyError();
 }
 function categoryError(code, error, params) {
   return { ok: false, code, error, ...params ? { params } : {} };
@@ -2368,7 +2184,7 @@ async function writableCategoryState(key, options = {}) {
 async function createCategory(key, name, log, options = {}) {
   const ready = await writableCategoryState(key, options);
   if ("ok" in ready) return ready;
-  const label = String(name || "").trim();
+  const label = typeof name === "string" ? name.trim() : "";
   if (!label || label.length > CATEGORY_NAME_MAX)
     return categoryError("error.category.name", "\u5206\u7C7B\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u4E0D\u80FD\u8D85\u8FC7 24 \u4E2A\u5B57\u7B26");
   if (ready.state.categories[ready.rootKey].some((item) => item.name === label))
@@ -2383,7 +2199,7 @@ async function createCategory(key, name, log, options = {}) {
 async function renameCategory(key, id, name, log, options = {}) {
   const ready = await writableCategoryState(key, options);
   if ("ok" in ready) return ready;
-  const label = String(name || "").trim();
+  const label = typeof name === "string" ? name.trim() : "";
   const list = ready.state.categories[ready.rootKey];
   const category = list.find((item) => item.id === id);
   if (!category) return categoryError("error.category.notFound", "\u5206\u7C7B\u4E0D\u5B58\u5728", { id });
@@ -2483,30 +2299,7 @@ async function moveSkillInCategory(key, skillName, categoryId, targetName, posit
   return { root: ready.rootKey, name: skillName, categoryId: categoryId || null, order: targetOrder };
 }
 async function setCategoryEnabled(key, categoryId, enabled, log, options = {}) {
-  const ready = await writableCategoryState(key, options);
-  if ("ok" in ready) return ready;
-  const root = ready.root;
-  if (categoryId && categoryId !== "*" && !ready.state.categories[ready.rootKey].some((item) => item.id === categoryId))
-    return categoryError("error.category.notFound", "\u5206\u7C7B\u4E0D\u5B58\u5728", { id: categoryId });
-  const scanned = (await scanEntries(root)).entries.map((entry) => entry.name);
-  const members = ready.state.categoryMembers[ready.rootKey];
-  const names = categoryId === "*" ? scanned : categoryId ? Object.entries(members).filter(([, id]) => id === categoryId).map(([name]) => name) : scanned.filter((name) => !members[name]);
-  const skipped = [];
-  const changedNames = [];
-  for (const name of names) {
-    const result = await applyPolicySkillEnabled(root, name, enabled, ready.state);
-    if (result && result.ok === false) {
-      if (result.code === "error.skill.notLoadable" || result.code === "error.skill.noFrontmatter") skipped.push(name);
-      else if (result.code !== "error.skill.notFound") return result;
-      continue;
-    }
-    changedNames.push(name);
-  }
-  if (changedNames.length) await writeManagerState(ready.state);
-  if (log)
-    for (const name of changedNames)
-      log(enabled ? "policy-enable" : "policy-disable", `${enabled ? "\u542F\u7528" : "\u505C\u7528"} ${ready.rootKey}/${name}\uFF08\u672C\u5730\u7B56\u7565\uFF0C\u6E90\u6587\u4EF6\u4E0D\u53D8\uFF09`);
-  return { root: ready.rootKey, categoryId: categoryId || null, enabled: enabled === true, changed: changedNames.length, skipped };
+  return legacyPolicyError();
 }
 function loadoutError(code, error, params) {
   return { ok: false, code, error, ...params ? { params } : {} };
@@ -2516,9 +2309,8 @@ async function writableLoadoutState() {
   if (current.writable === false) return invalidManagerStateWrite();
   const state2 = current.state;
   const loadouts = Array.isArray(state2.loadouts) ? state2.loadouts : state2.loadouts = [];
-  const activeLoadout = state2.activeLoadout && typeof state2.activeLoadout === "object" && !Array.isArray(state2.activeLoadout) ? state2.activeLoadout : state2.activeLoadout = /* @__PURE__ */ Object.create(null);
   const sessionLoadouts = state2.sessionLoadouts && typeof state2.sessionLoadouts === "object" && !Array.isArray(state2.sessionLoadouts) ? state2.sessionLoadouts : state2.sessionLoadouts = /* @__PURE__ */ Object.create(null);
-  return { state: state2, loadouts, activeLoadout, sessionLoadouts };
+  return { state: state2, loadouts, sessionLoadouts };
 }
 function findLoadout(loadouts, id) {
   return loadouts.find((item) => item.id === id);
@@ -2541,6 +2333,7 @@ async function checkedLoadoutMember(root, name, options = {}) {
   const rootKey = typeof root === "string" ? root : "";
   const definition = rootKey ? await resolvedCategoryRoot(rootKey, options) : null;
   if (!definition) return loadoutError("error.loadout.root", `\u6280\u80FD\u6765\u6E90\u4E0D\u5B58\u5728: ${rootKey}`, { root: rootKey });
+  if (definition.scope === "project" || PROJECT_ROOT_KEY_RE.test(rootKey)) return loadoutError("error.loadout.globalOnly", "Groups may contain global skills only", { root: rootKey });
   const skillName = typeof name === "string" ? name : "";
   if (!validStateSkillName(skillName))
     return loadoutError("error.skill.notFound", `\u6280\u80FD\u4E0D\u5B58\u5728: ${skillName}`, { name: skillName });
@@ -2549,20 +2342,26 @@ async function checkedLoadoutMember(root, name, options = {}) {
     return loadoutError("error.skill.notFound", `\u6280\u80FD\u4E0D\u5B58\u5728: ${skillName}`, { name: skillName });
   return { root: definition.key, name: skillName };
 }
-async function createLoadout(name, note, members, log, options = {}) {
+async function createLoadout(name, note, members, log, options = {}, copyFrom) {
   const ready = await writableLoadoutState();
   if ("ok" in ready) return ready;
-  const label = String(name || "").trim();
+  const label = typeof name === "string" ? name.trim() : "";
   if (!label || label.length > LOADOUT_NAME_MAX)
     return loadoutError("error.loadout.name", "\u7F16\u7EC4\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u4E0D\u80FD\u8D85\u8FC7 24 \u4E2A\u5B57\u7B26");
   if (ready.loadouts.some((item) => item.name === label))
     return loadoutError("error.loadout.duplicate", `\u5DF2\u6709\u540C\u540D\u7F16\u7EC4: ${label}`, { name: label });
-  const text = note === void 0 || note === null ? "" : String(note).trim();
+  if (note !== void 0 && note !== null && typeof note !== "string") return loadoutError("error.proto.invalidParams", "note must be a string or null");
+  const text = note === void 0 || note === null ? "" : note.trim();
   if (text.length > LOADOUT_NOTE_MAX)
     return loadoutError("error.loadout.noteTooLong", `\u7F16\u7EC4\u5907\u6CE8\u8FC7\u957F\uFF08\u6700\u591A ${LOADOUT_NOTE_MAX} \u4E2A\u5B57\u7B26\uFF09`, { max: LOADOUT_NOTE_MAX });
+  if (members !== void 0 && !Array.isArray(members)) return loadoutError("error.proto.invalidParams", "members must be an array");
+  const copied = copyFrom === void 0 ? void 0 : findLoadout(ready.loadouts, copyFrom);
+  if (copyFrom !== void 0 && !copied) return loadoutError("error.loadout.notFound", "Copy source not found");
   const initial = [];
   for (const member of Array.isArray(members) ? members : []) {
-    const checked = await checkedLoadoutMember(member && member.root, member && member.name, options);
+    if (PROJECT_ROOT_KEY_RE.test(member?.root)) return loadoutError("error.loadout.globalOnly", "Groups may contain global skills only", { root: member.root });
+    const existing = copied?.members.find((item) => item.root === member?.root && item.name === member?.name);
+    const checked = existing ? { ...existing } : await checkedLoadoutMember(member && member.root, member && member.name, options);
     if ("ok" in checked) return checked;
     if (!initial.some((item) => item.root === checked.root && item.name === checked.name))
       initial.push(checked);
@@ -2573,12 +2372,60 @@ async function createLoadout(name, note, members, log, options = {}) {
   if (log) log("loadout-create", `\u521B\u5EFA\u7F16\u7EC4 ${label}\uFF08${initial.length} \u4E2A\u6210\u5458\uFF09`);
   return { loadout };
 }
+async function updateLoadout(id, name, note, members, log, options = {}) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const current = findLoadout(ready.loadouts, id);
+  if (!current) return loadoutError("error.loadout.notFound", "Loadout not found", { id });
+  const label = typeof name === "string" ? name.trim() : "";
+  if (!label || label.length > LOADOUT_NAME_MAX) return loadoutError("error.loadout.name", "Loadout name must contain 1\u201324 characters");
+  if (ready.loadouts.some((item) => item.id !== id && item.name === label)) return loadoutError("error.loadout.duplicate", "Duplicate loadout name");
+  if (note !== null && note !== void 0 && typeof note !== "string") return loadoutError("error.proto.invalidParams", "note must be a string or null");
+  const text = typeof note === "string" ? note.trim() : "";
+  if (text.length > LOADOUT_NOTE_MAX) return loadoutError("error.loadout.noteTooLong", "Loadout note exceeds 140 characters");
+  if (!Array.isArray(members)) return loadoutError("error.proto.invalidParams", "members must be an array");
+  const next = [];
+  for (const member of members) {
+    if (PROJECT_ROOT_KEY_RE.test(member?.root)) return loadoutError("error.loadout.globalOnly", "Groups may contain global skills only", { root: member.root });
+    const retained = current.members.find((item) => item.root === member?.root && item.name === member?.name);
+    const checked = retained ? { ...retained } : await checkedLoadoutMember(member?.root, member?.name, options);
+    if ("ok" in checked) return checked;
+    if (!next.some((item) => item.root === checked.root && item.name === checked.name)) next.push(checked);
+  }
+  const loadout = { id, name: label, note: text || null, members: next };
+  ready.state.loadouts = ready.loadouts.map((item) => item.id === id ? loadout : item);
+  await writeManagerState(ready.state);
+  if (log) log("loadout-update", { id, name: label, members: next });
+  return { loadout };
+}
+function legacyMigration(state2) {
+  const manualReferences = [];
+  for (const [root, names] of Object.entries(state2.enabledSkills || {})) {
+    if (!Array.isArray(names) || PROJECT_ROOT_KEY_RE.test(root)) continue;
+    for (const name of names) if (validStateSkillName(name) && !manualReferences.some((item) => item.root === root && item.name === name)) manualReferences.push({ root, name });
+  }
+  return { manualReferences, hasLegacyPolicy: manualReferences.length > 0 || state2.gatekeeper === false || Object.keys(state2.activeLoadout || {}).length > 0 || Object.values(state2.sources || {}).some((enabled) => enabled === false) || Object.values(state2.disabledSkills || {}).some((names) => Array.isArray(names) && names.length > 0) || Object.keys(state2.disabledRoots || {}).length > 0 };
+}
+async function importLegacyLoadout(name, log) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const label = typeof name === "string" ? name.trim() : "";
+  if (!label || label.length > LOADOUT_NAME_MAX) return loadoutError("error.loadout.name", "Loadout name must contain 1\u201324 characters");
+  if (ready.loadouts.some((item) => item.name === label)) return loadoutError("error.loadout.duplicate", "Duplicate loadout name");
+  const members = legacyMigration(ready.state).manualReferences;
+  if (!members.length) return loadoutError("error.loadout.noLegacyReferences", "There are no legacy manual references to import");
+  const loadout = { id: randomBytes(8).toString("hex"), name: label, note: null, members };
+  ready.loadouts.push(loadout);
+  await writeManagerState(ready.state);
+  if (log) log("loadout-import-legacy", { id: loadout.id, members });
+  return { loadout };
+}
 async function renameLoadout(id, name, log) {
   const ready = await writableLoadoutState();
   if ("ok" in ready) return ready;
   const loadout = findLoadout(ready.loadouts, id);
   if (!loadout) return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id });
-  const label = String(name || "").trim();
+  const label = typeof name === "string" ? name.trim() : "";
   if (!label || label.length > LOADOUT_NAME_MAX)
     return loadoutError("error.loadout.name", "\u7F16\u7EC4\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A\uFF0C\u4E14\u4E0D\u80FD\u8D85\u8FC7 24 \u4E2A\u5B57\u7B26");
   if (ready.loadouts.some((item) => item !== loadout && item.name === label))
@@ -2594,11 +2441,10 @@ async function deleteLoadout(id, log) {
   const loadout = findLoadout(ready.loadouts, id);
   if (!loadout) return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id });
   ready.state.loadouts = ready.loadouts.filter((item) => item.id !== id);
-  for (const [scope, active] of Object.entries(ready.activeLoadout)) {
-    if (active === id) delete ready.activeLoadout[scope];
-  }
-  for (const [session, selected] of Object.entries(ready.sessionLoadouts)) {
-    if (selected === id) delete ready.sessionLoadouts[session];
+  ready.state.defaultLoadoutIds = (ready.state.defaultLoadoutIds || []).filter((item) => item !== id);
+  for (const session of Object.keys(ready.sessionLoadouts)) {
+    const ids = storedSessionLoadouts(ready.state, session);
+    if (ids.includes(id)) ready.sessionLoadouts[session] = ids.filter((item) => item !== id);
   }
   await writeManagerState(ready.state);
   if (log) log("loadout-delete", `\u5220\u9664\u7F16\u7EC4 ${loadout.name}\uFF08${id}\uFF09\uFF0C\u6280\u80FD\u672C\u8EAB\u4E0D\u53D7\u5F71\u54CD`);
@@ -2648,104 +2494,16 @@ async function removeFromLoadout(id, root, name, log) {
   return { id, root: rootKey, name: skillName, removed };
 }
 async function setLoadoutEnabled(id, enabled, log, options = {}) {
-  const ready = await writableLoadoutState();
-  if ("ok" in ready) return ready;
-  const loadout = findLoadout(ready.loadouts, id);
-  if (!loadout) return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id });
-  const skipped = [];
-  const changedNames = [];
-  for (const member of loadout.members) {
-    const root = await resolvedCategoryRoot(member.root, options);
-    if (!root) {
-      skipped.push(`${member.root}/${member.name}`);
-      continue;
-    }
-    const result = await applyPolicySkillEnabled(root, member.name, enabled, ready.state);
-    if (result && result.ok === false) {
-      skipped.push(`${member.root}/${member.name}`);
-      continue;
-    }
-    changedNames.push(`${member.root}/${member.name}`);
-  }
-  if (changedNames.length) await writeManagerState(ready.state);
-  if (log)
-    for (const name of changedNames)
-      log(enabled ? "policy-enable" : "policy-disable", `${enabled ? "\u542F\u7528" : "\u505C\u7528"} ${name}\uFF08\u672C\u5730\u7B56\u7565\uFF0C\u6E90\u6587\u4EF6\u4E0D\u53D8\uFF09`);
-  return { id, enabled: enabled === true, changed: changedNames.length, skipped };
+  return legacyPolicyError();
 }
 async function applyLoadout(id, applyOptions = {}, log, options = {}) {
-  const ready = await writableLoadoutState();
-  if ("ok" in ready) return ready;
-  const loadout = findLoadout(ready.loadouts, id);
-  if (!loadout) return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id });
-  const exclusive = applyOptions.exclusive === true;
-  const scopeKey = await loadoutScopeKey(options);
-  if (ready.state.gatekeeper !== false) {
-    const gatedSkipped = [];
-    let gatedApplied = 0;
-    for (const member of loadout.members) {
-      const root = await resolvedCategoryRoot(member.root, options);
-      const entry = root ? await resolveEntry(root, member.name) : null;
-      if (!entry) {
-        gatedSkipped.push(`${member.root}/${member.name}`);
-        continue;
-      }
-      gatedApplied += 1;
-    }
-    ready.activeLoadout[scopeKey] = id;
-    await writeManagerState(ready.state);
-    if (log)
-      log("loadout-apply", `\u5E94\u7528\u7F16\u7EC4 ${loadout.name}\uFF08${scopeKey}\uFF0C\u5B88\u95E8\u4EBA\uFF09\uFF1A\u8BBE\u4E3A\u5F53\u524D\uFF0C\u6210\u5458 ${gatedApplied} \u4E2A\uFF0C\u8DF3\u8FC7 ${gatedSkipped.length} \u4E2A`);
-    return { id, scope: scopeKey, exclusive, applied: gatedApplied, skipped: gatedSkipped, disabledOthers: 0 };
-  }
-  const memberKeys = new Set(loadout.members.map((member) => `${member.root}/${member.name}`));
-  const skipped = [];
-  const changedNames = [];
-  let disabledOthers = 0;
-  if (exclusive) {
-    const candidateRoots = [...userRoots(), ...await projectRoots(options.projectCwds)].filter((root) => root.toggleable !== false);
-    const disabling = [];
-    for (const root of candidateRoots) {
-      const { entries } = await scanEntries(root);
-      for (const entry of entries) {
-        if (memberKeys.has(`${root.key}/${entry.name}`)) continue;
-        if (entry.loadable === false) continue;
-        const policy = effectiveSkillPolicy({ state: ready.state, writable: true, warning: null }, root, entry, scopeKey);
-        if (policy.enabled) disabling.push({ root, name: entry.name });
-      }
-    }
-    for (const item of disabling) {
-      const result = await applyPolicySkillEnabled(item.root, item.name, false, ready.state);
-      if (result && result.ok === false) continue;
-      disabledOthers += 1;
-      changedNames.push(`${item.root.key}/${item.name}`);
-    }
-  }
-  let applied = 0;
-  for (const member of loadout.members) {
-    const root = await resolvedCategoryRoot(member.root, options);
-    if (!root) {
-      skipped.push(`${member.root}/${member.name}`);
-      continue;
-    }
-    const result = await applyPolicySkillEnabled(root, member.name, true, ready.state);
-    if (result && result.ok === false) {
-      skipped.push(`${member.root}/${member.name}`);
-      continue;
-    }
-    applied += 1;
-    changedNames.push(`${member.root}/${member.name}`);
-  }
-  ready.activeLoadout[scopeKey] = id;
-  await writeManagerState(ready.state);
-  if (log)
-    log("loadout-apply", `\u5E94\u7528\u7F16\u7EC4 ${loadout.name}\uFF08${scopeKey}${exclusive ? "\uFF0C\u6392\u4ED6" : ""}\uFF09\uFF1A\u542F\u7528 ${applied}\uFF0C\u8DF3\u8FC7 ${skipped.length}\uFF0C\u505C\u7528\u7EC4\u5916 ${disabledOthers}`);
-  return { id, scope: scopeKey, exclusive, applied, skipped, disabledOthers };
+  const sessionId = sessionIdOf(options);
+  if (!sessionId) return legacyPolicyError();
+  return setSessionLoadout(sessionId, id, log);
 }
 async function currentLoadout(scope) {
   const current = await readManagerState();
-  const key = typeof scope === "string" && scope ? scope : "user";
-  return current.state.activeLoadout?.[key] || null;
+  return resolveEffectiveLoadout(current.state, "user", scope).loadoutId;
 }
 async function listLoadouts(options = {}) {
   const current = await readManagerState();
@@ -2753,74 +2511,129 @@ async function listLoadouts(options = {}) {
   return {
     scope: scopeKey,
     loadouts: current.state.loadouts || [],
-    active: current.state.activeLoadout?.[scopeKey] || null,
-    gatekeeper: current.state.gatekeeper !== false
+    active: resolveEffectiveLoadout(current.state, scopeKey, sessionIdOf(options)).loadoutId,
+    activeIds: resolveEffectiveLoadout(current.state, scopeKey, sessionIdOf(options)).loadoutIds,
+    gatekeeper: true,
+    migration: legacyMigration(current.state)
   };
 }
-async function setSessionLoadout(sessionId, loadoutId, log) {
-  const session = typeof sessionId === "string" ? sessionId.trim() : "";
-  if (!validSessionId(session))
-    return loadoutError("error.session.invalid", `\u4F1A\u8BDD\u6807\u8BC6\u65E0\u6548\uFF0C\u65E0\u6CD5\u8BB0\u5F55\u4F1A\u8BDD\u7F16\u7EC4: ${session}`, { sessionId: session });
+async function getDefaultLoadouts() {
+  const current = await readManagerState();
+  if (!current.writable) return invalidManagerStateWrite();
+  return { loadoutIds: current.state.defaultLoadoutIds || [] };
+}
+async function setDefaultLoadouts(loadoutIds, log) {
+  if (!Array.isArray(loadoutIds) || loadoutIds.some((id) => typeof id !== "string" || !LOADOUT_ID_RE.test(id)))
+    return loadoutError("error.proto.invalidParams", "loadoutIds must be an array of non-empty loadout ids");
+  const ids = [...new Set(loadoutIds)];
   const ready = await writableLoadoutState();
   if ("ok" in ready) return ready;
-  if (loadoutId === void 0 || loadoutId === null) {
-    delete ready.sessionLoadouts[session];
-    await writeManagerState(ready.state);
-    if (log) log("loadout-session", `\u4F1A\u8BDD ${session} \u6E05\u9664\u7F16\u7EC4\u8986\u76D6\uFF08\u56DE\u843D\u4F5C\u7528\u57DF\uFF09`);
-    return { sessionId: session, loadoutId: null, cleared: true };
-  }
-  const chosen = String(loadoutId);
-  if (chosen === "") {
-    ready.sessionLoadouts[session] = "";
-    await writeManagerState(ready.state);
-    if (log) log("loadout-session", `\u4F1A\u8BDD ${session} \u9009\u62E9\u4E0D\u52A0\u8F7D\u4EFB\u4F55\u7F16\u7EC4`);
-    return { sessionId: session, loadoutId: "", cleared: false };
-  }
-  const loadout = findLoadout(ready.loadouts, chosen);
-  if (!loadout)
-    return loadoutError("error.loadout.notFound", "\u7F16\u7EC4\u4E0D\u5B58\u5728", { id: chosen });
-  ready.sessionLoadouts[session] = chosen;
+  for (const id of ids) if (!findLoadout(ready.loadouts, id)) return loadoutError("error.loadout.notFound", "Loadout not found", { id });
+  ready.state.defaultLoadoutIds = ids;
   await writeManagerState(ready.state);
-  if (log) log("loadout-session", `\u4F1A\u8BDD ${session} \u4F7F\u7528\u7F16\u7EC4 ${loadout.name}`);
-  return { sessionId: session, loadoutId: chosen, cleared: false };
+  if (log) log("loadout-defaults", { loadoutIds: ids });
+  return { loadoutIds: ids };
 }
-async function effectiveLoadoutSkillNames(policyResult, loadout, scopeKey, sessionId, options) {
-  const names = [];
-  const seen = /* @__PURE__ */ new Set();
-  const scans = /* @__PURE__ */ new Map();
-  for (const member of loadout.members) {
-    const root = await resolvedCategoryRoot(member.root, options);
-    if (!root) continue;
-    let entries = scans.get(root.key);
-    if (!entries) {
-      entries = (await scanEntries(root)).entries;
-      scans.set(root.key, entries);
-    }
-    const entry = entries.find((item) => item.name === member.name);
-    if (!entry || entry.loadable === false) continue;
-    if (!effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId).enabled) continue;
-    if (seen.has(entry.name)) continue;
-    seen.add(entry.name);
-    names.push(entry.name);
+async function initializeNewSessionLoadouts(sessionId, log) {
+  const session = typeof sessionId === "string" ? sessionId.trim() : "";
+  if (!validSessionId(session)) return loadoutError("error.session.invalid", "Invalid session id", { sessionId: session });
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  if (Object.prototype.hasOwnProperty.call(ready.sessionLoadouts, session))
+    return { sessionId: session, loadoutIds: storedSessionLoadouts(ready.state, session), initialized: false };
+  const ids = [...ready.state.defaultLoadoutIds || []];
+  ready.sessionLoadouts[session] = ids;
+  await writeManagerState(ready.state);
+  if (log) log("loadout-session-initialized", { sessionId: session, loadoutIds: ids });
+  return { sessionId: session, loadoutIds: ids, initialized: true };
+}
+async function setSessionLoadouts(sessionId, loadoutIds, log) {
+  const session = typeof sessionId === "string" ? sessionId.trim() : "";
+  if (!validSessionId(session)) return loadoutError("error.session.invalid", "Invalid session id", { sessionId: session });
+  if (!Array.isArray(loadoutIds) || loadoutIds.some((id) => typeof id !== "string" || !LOADOUT_ID_RE.test(id)))
+    return loadoutError("error.proto.invalidParams", "loadoutIds must be an array of non-empty loadout ids");
+  const ids = [...new Set(loadoutIds)];
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  for (const id of ids) if (!findLoadout(ready.loadouts, id)) return loadoutError("error.loadout.notFound", "Loadout not found", { id });
+  ready.sessionLoadouts[session] = ids;
+  await writeManagerState(ready.state);
+  if (log) log("loadout-session", { sessionId: session, loadoutIds: ids });
+  return { sessionId: session, loadoutIds: ids, loadoutId: ids.length === 1 ? ids[0] : null, cleared: ids.length === 0 };
+}
+async function setSessionLoadout(sessionId, loadoutId, log) {
+  const result = await setSessionLoadouts(sessionId, loadoutId === void 0 || loadoutId === null || loadoutId === "" ? [] : [loadoutId], log);
+  if ("ok" in result) return result;
+  return { sessionId: result.sessionId, loadoutId: result.loadoutId, cleared: result.cleared };
+}
+async function effectiveLoadoutMembers(policyResult, loadouts, sessionId, options) {
+  const { items } = await providerItems({ ...options, sessionId: sessionId || void 0 }, policyResult);
+  const winners = new Map([...groupLoadableSkillsByName(items)].map(([name, group]) => [name, selectSkillWinner(group)]));
+  const skills = [];
+  const members = [];
+  const union = /* @__PURE__ */ new Map();
+  for (const loadout of loadouts) for (const member of loadout.members) {
+    if (PROJECT_ROOT_KEY_RE.test(member.root)) continue;
+    const key = JSON.stringify([member.root, member.name]);
+    const existing = union.get(key);
+    if (existing) {
+      if (!existing.loadoutIds.includes(loadout.id)) existing.loadoutIds.push(loadout.id);
+    } else union.set(key, { ...member, loadoutIds: [loadout.id], projectDefault: false });
   }
-  return names;
+  if (sessionId) for (const { root, entry } of items) {
+    const projectRefs = [{ root: root.key, name: entry.name }, ...(entry.policyAliases || []).map((alias) => ({ root: alias.rootKey, name: alias.name }))].filter((member) => PROJECT_ROOT_KEY_RE.test(member.root));
+    for (const member of projectRefs) {
+      const key = JSON.stringify([member.root, member.name]);
+      const existing = union.get(key);
+      if (existing) existing.projectDefault = true;
+      else union.set(key, { ...member, loadoutIds: [], projectDefault: true });
+    }
+  }
+  for (const member of union.values()) {
+    const item = items.find(({ root, entry }) => root.key === member.root && entry.name === member.name || entry.policyAliases?.some((alias) => alias.rootKey === member.root && alias.name === member.name));
+    if (!item) {
+      members.push({ ...member, displayName: member.name, status: "missing", reason: "Skill is missing, unreadable, or outside this session's inventory" });
+      continue;
+    }
+    const name = canonicalSkillName(item);
+    const base = { ...member, displayName: item.entry.declaredName || member.name };
+    if (item.policy.excluded) {
+      members.push({
+        ...base,
+        status: "excluded",
+        reason: "Excluded for this session",
+        excludedBy: sessionExcludedSkills(policyResult.state, sessionId).filter((ref) => matchesReference(ref, item.root, item.entry))
+      });
+    } else if (!item.entry.loadable || !item.entry.invocationPolicyValid || !item.policy.enabled) {
+      members.push({ ...base, status: "invalid", reason: item.entry.diagnostics.map((diagnostic) => diagnostic.code).filter(Boolean).join(", ") || "Skill has no available invocation channel or manager state is unreadable" });
+    } else if (winners.get(name) !== item) {
+      const winner = winners.get(name);
+      members.push({ ...base, status: "shadowed", reason: `Canonical skill ${name} is provided by ${winner.root.key}/${winner.entry.name}` });
+    } else {
+      members.push({ ...base, status: "available" });
+      if (!skills.includes(name)) skills.push(name);
+    }
+  }
+  return { skills, members };
 }
 async function sessionLoadoutView(sessionId, options = {}) {
   const current = await readManagerState();
   const session = validSessionId(sessionId) ? sessionId : null;
   const scopeKey = await loadoutScopeKey(options);
   const resolution = resolveEffectiveLoadout(current.state, scopeKey, session);
-  const skills = resolution.loadout ? await effectiveLoadoutSkillNames(current, resolution.loadout, scopeKey, session, options) : [];
-  const stored = storedSessionLoadout(current.state, session);
+  const effective = await effectiveLoadoutMembers(current, resolution.loadouts, session, options);
   return {
     sessionId: session,
     scope: scopeKey,
-    loadoutId: stored === void 0 ? null : stored,
-    gatekeeper: current.state.gatekeeper !== false,
+    loadoutId: resolution.loadoutId,
+    loadoutIds: resolution.loadoutIds,
+    excludedSkills: sessionExcludedSkills(current.state, session),
+    gatekeeper: true,
     effective: {
       source: resolution.source,
       loadout: resolution.loadout,
-      skills
+      loadouts: resolution.loadouts,
+      ...effective
     }
   };
 }
@@ -3858,34 +3671,31 @@ async function skillDetail(key, name, options = {}) {
     sourceReadOnly: !root.mutable || entry.linked === true
   };
 }
+function inventoryCwds(options) {
+  return typeof options.cwd === "string" ? [options.cwd] : options.projectCwds || [];
+}
+async function providerItems(options, policyResult) {
+  const user = userRoots();
+  const roots = [...user, ...await projectRoots(inventoryCwds(options))];
+  const scans = await scanDeduplicatedRoots(roots);
+  const scopeKey = await loadoutScopeKey({ projectCwds: inventoryCwds(options) });
+  const sessionId = sessionIdOf(options);
+  const items = roots.flatMap((root) => scans.get(root.key).entries.map((entry) => ({
+    root,
+    entry,
+    policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId)
+  })));
+  return { items, user, roots, scans };
+}
 async function listProviderCandidates(options = {}) {
   const policyResult = await readManagerState();
   const candidates = [];
-  const user = userRoots();
-  const userScans = await scanDeduplicatedRoots(user);
-  const cwd = options && typeof options.cwd === "string" ? options.cwd : void 0;
-  const scopeKey = await loadoutScopeKey({ projectCwds: cwd ? [cwd] : [] });
-  const sessionId = sessionIdOf(options);
-  const items = user.flatMap(
-    (root) => userScans.get(root.key).entries.map((entry) => ({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId) }))
-  );
-  if (cwd) {
-    const roots = await projectRoots([cwd]);
-    for (const root of roots) {
-      const scanned = (await scanDeduplicatedRoots([root])).get(root.key);
-      for (const entry of scanned.entries) items.push({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId) });
-    }
-  }
+  const { items } = await providerItems(options, policyResult);
   for (const group of groupLoadableSkillsByName(items).values()) {
     const { root, entry, policy } = selectSkillWinner(group);
-    const hasNativeCopy = group.some(({ root: root2, entry: entry2 }) => root2.native || entry2.policyAliases?.some((alias) => user.some((item) => item.key === alias.rootKey && item.native)));
-    const hasExplicitDisable = group.some((item) => item.policy.override === false);
-    if (!hasNativeCopy && !hasExplicitDisable && !policy.sourceEnabled) continue;
     const project = root.scope === "project";
     const policyOnly = root.mutable && root.key !== "agents";
     const overlayRank = group.length > 1 ? Math.min(...group.map((item) => Math.min(item.root.rank, item.entry.providerRank ?? item.root.rank))) - 1 : void 0;
-    const needsOverlay = !policyOnly || group.length > 1 || policy.override !== void 0 || !entry.invocationPolicyValid || policyResult.writable === false || !policy.sourceEnabled || policy.gated === true;
-    if (!needsOverlay) continue;
     const candidateName = canonicalSkillName({ root, entry, policy });
     if (!KEBAB_RE.test(candidateName)) continue;
     candidates.push({
@@ -3895,7 +3705,7 @@ async function listProviderCandidates(options = {}) {
         modelInvocable: policy.modelInvocable,
         userInvocable: policy.userInvocable
       },
-      provider: "dsh-skills-manager-external",
+      provider: "dsh-loadout-external",
       source: project ? root.kind : root.key === "dsh" ? "user-dsh" : `agent-${root.key}`,
       rank: overlayRank ?? (project ? root.rank - 1 : root.key === "dsh" ? USER_DSH_POLICY_RANK : entry.providerRank ?? root.rank),
       locator: {
@@ -3926,9 +3736,12 @@ async function getProviderSkill(candidate, options = {}) {
   const locator = candidate && candidate.locator;
   if (!locator || typeof locator.path !== "string" || typeof locator.rootKey !== "string" || typeof locator.realEntryPath !== "string" || typeof locator.realDocPath !== "string")
     return void 0;
+  const fresh = (await listProviderCandidates(options)).find((item) => item.name === candidate.name && item.locator.rootKey === locator.rootKey && item.locator.entryName === locator.entryName && item.locator.realDocPath === locator.realDocPath);
+  if (!fresh) return void 0;
+  candidate = fresh;
   let root = rootByKey(locator.rootKey);
-  if (!root && PROJECT_ROOT_KEY_RE.test(locator.rootKey) && typeof options.cwd === "string") {
-    root = (await projectRoots([options.cwd])).find(
+  if (!root && PROJECT_ROOT_KEY_RE.test(locator.rootKey) && inventoryCwds(options).length > 0) {
+    root = (await projectRoots(inventoryCwds(options))).find(
       (item) => item.key === locator.rootKey
     );
   }
@@ -3983,7 +3796,7 @@ function groupLoadableSkillsByName(items) {
   return groups;
 }
 function isCopyDisabled(item) {
-  return !item.policy.sourceEnabled || item.policy.override === false || item.policy.gated === true;
+  return !item.policy.enabled;
 }
 function selectSkillWinner(group) {
   return group.find((item) => !isCopyDisabled(item)) || group[0];
@@ -4004,6 +3817,7 @@ function markWinners(items) {
           item.view.fallbackTo = { root: winner.root.key, name: winner.entry.name, scope: winner.root.scope || "user" };
         }
       } else if (item !== winner) {
+        item.view.enabled = false;
         item.view.shadowedBy = { root: winner.root.key, name: winner.entry.name };
       }
     }
@@ -4068,10 +3882,10 @@ async function workspaceSkills(workspace, registered) {
 }
 async function state(options = {}) {
   const user = userRoots();
-  const userScans = await scanDeduplicatedRoots(user);
   const projectWarnings = [];
   const scoped = await projectRoots(options.projectCwds, projectWarnings);
   const policyResult = await readManagerState();
+  const scans = await scanDeduplicatedRoots([...user, ...scoped]);
   const trash = await listTrash();
   const scopeKey = await loadoutScopeKey(options);
   const sessionId = sessionIdOf(options);
@@ -4082,8 +3896,12 @@ async function state(options = {}) {
     projects: [],
     summary: { total: 0, enabled: 0, disabled: 0, issues: 0 },
     trash,
-    // 守门人开关下发给 UI：非成员技能显示"未加载"，开关含义变为"引用"。
-    gatekeeper: policyResult.state.gatekeeper !== false,
+    // Compatibility field: session membership is always enforced.
+    gatekeeper: true,
+    migration: legacyMigration(policyResult.state),
+    active: resolveEffectiveLoadout(policyResult.state, scopeKey, sessionId).loadoutId,
+    activeIds: resolveEffectiveLoadout(policyResult.state, scopeKey, sessionId).loadoutIds,
+    scope: scopeKey,
     warnings: [
       ...policyResult.warning ? [policyResult.warning] : [],
       ...projectWarnings,
@@ -4092,7 +3910,7 @@ async function state(options = {}) {
   };
   const all = [];
   for (const root of [...scoped, ...user]) {
-    const { exists, entries, truncated } = root.scope === "project" ? (await scanDeduplicatedRoots([root])).get(root.key) : userScans.get(root.key);
+    const { exists, entries, truncated } = scans.get(root.key);
     if (root.scope === "project" && !exists && root.kind !== "project-dsh")
       continue;
     if (truncated)
@@ -4110,7 +3928,7 @@ async function state(options = {}) {
     const skills = [];
     for (const e of entries) {
       const policy = effectiveSkillPolicy(policyResult, root, e, scopeKey, sessionId);
-      const managerEnabled = policyResult.writable !== false && policy.sourceEnabled && policy.override !== false;
+      const managerEnabled = policy.enabled;
       skills.push({
         name: e.name,
         declaredName: e.declaredName,
@@ -4162,29 +3980,13 @@ async function state(options = {}) {
       } : {},
       exists,
       truncated: truncated === true,
-      enabled: policyResult.writable !== false && (root.kind === "project-dsh" || policyResult.state.sources[root.key] !== false),
+      enabled: policyResult.writable !== false,
       skills,
       categories: policyResult.state.categories[root.key] || [],
       categoryOrder: policyResult.state.categoryOrder[root.key] || {}
     });
   }
-  const userItems = all.filter((item) => item.root.scope !== "project");
-  markWinners(userItems);
-  const projectGroups = /* @__PURE__ */ new Map();
-  for (const item of all.filter(
-    (candidate) => candidate.root.scope === "project"
-  )) {
-    const group = projectGroups.get(item.root.projectRoot) || [];
-    group.push(item);
-    projectGroups.set(item.root.projectRoot, group);
-  }
-  for (const projectItems of projectGroups.values()) {
-    const userCopies = userItems.map((item) => ({
-      ...item,
-      view: { ...item.view }
-    }));
-    markWinners([...projectItems, ...userCopies]);
-  }
+  markWinners(all);
   const seenProjects = /* @__PURE__ */ new Set();
   for (const root of result.roots.filter((item) => item.scope === "project")) {
     if (seenProjects.has(root.projectRoot)) continue;
@@ -4222,14 +4024,18 @@ export {
   deleteSkill,
   effectiveSkillPolicy,
   entryPath,
+  getDefaultLoadouts,
   getGatekeeper,
   getOnlineUpdate,
   getProviderSkill,
   getSidebarEntry,
+  importLegacyLoadout,
   importSkill,
   importUploadedSkill,
   indexRegisteredWorkspaces,
+  initializeNewSessionLoadouts,
   isCustomSourceKey,
+  legacyPolicyError,
   listLoadouts,
   listProviderCandidates,
   listTrash,
@@ -4261,15 +4067,19 @@ export {
   rootPathConfigPath,
   scanCustomSourceCandidates,
   scanEntries,
+  sessionExcludedSkills,
   sessionIdOf,
   sessionLoadoutView,
   setCategoryEnabled,
+  setDefaultLoadouts,
   setGatekeeper,
   setLoadoutEnabled,
   setLoadoutNote,
   setOnlineUpdate,
   setRootPath,
   setSessionLoadout,
+  setSessionLoadouts,
+  setSessionSkillExclusions,
   setSidebarEntry,
   setSkillEnabled,
   setSkillNote,
@@ -4278,10 +4088,12 @@ export {
   skillDetail,
   state,
   storedSessionLoadout,
+  storedSessionLoadouts,
   toKebab,
   trashRootPath,
   unquote,
   updateCustomSource,
+  updateLoadout,
   userRoots,
   workspaceSkills
 };

@@ -121,9 +121,11 @@ try {
   assert.equal(await exists(join(agentsRoot, "agents-import-src", "SKILL.md")), true);
   // 写进 Shared Agent 的技能，在管理页里要能正常启停，并能移入回收站后原样恢复。
   response = await post("disable", { root: "agents", name: "agents-created" });
-  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(response.status, 400, await response.clone().text());
+  assert.equal((await response.json()).code, "error.policy.sessionOnly");
   response = await post("enable", { root: "agents", name: "agents-created" });
-  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(response.status, 400, await response.clone().text());
+  assert.equal((await response.json()).code, "error.policy.sessionOnly");
   response = await post("delete", { root: "agents", name: "agents-created" });
   assert.equal(response.status, 200, await response.clone().text());
   const agentsDeleted = (await response.json()).data;
@@ -253,7 +255,7 @@ try {
   assert.equal(await exists(join(registered, ".dsh", "skills", "route-repo", "SKILL.md")), true);
 
   response = await post("disable", { name: "user-still-ok", root: "dsh" });
-  assert.equal(response.status, 200, "不带 workspace 仍可停用全局技能");
+  assert.equal(response.status, 400, "全局旧启停接口同样拒绝");
   response = await post("enable", { name: "user-still-ok", root: "dsh", workspace: registered });
   assert.equal(response.status, 400, "带 workspace 时 root=dsh 不能改全局技能");
   assert.equal(await exists(join(globalRoot, "user-still-ok", "SKILL.md")), true);
@@ -266,7 +268,7 @@ try {
   assert.equal(await exists(join(globalRoot, "user-still-ok", "SKILL.md")), true);
   const projectKey = (await (await post("workspace-skills", { workspace: registered })).json()).data.roots.find((item) => item.kind === "project-dsh").key;
   response = await post("disable", { name: "route-create", root: projectKey, workspace: registered });
-  assert.equal(response.status, 200, "工作区范围内仍可按项目根键停用");
+  assert.equal(response.status, 400, "项目旧启停接口同样拒绝");
   response = await post("category-create", { root: "project-dsh:0123456789abcdef", name: "假项目分类", workspace: registered });
   assert.equal(response.status, 400);
   assert.equal((await response.json()).code, "error.category.root", "未登记项目键不能创建分类");
@@ -296,9 +298,10 @@ try {
   response = await post("skill-note", { root: "project-dsh:0123456789abcdef", name: "route-create", note: "测试", workspace: registered });
   assert.equal(response.status, 400);
   assert.equal((await response.json()).code, "error.note.root");
+  emitted.length = 0;
   response = await post("category-disable", { root: projectKey, category: categoryId, workspace: registered });
-  assert.equal(response.status, 200, await response.clone().text());
-  assert.ok(emitted.some(([name]) => name === "commands/change"), "分类启停仍刷新宿主技能目录");
+  assert.equal(response.status, 400, await response.clone().text());
+  assert.deepEqual(emitted, [], "拒绝旧分类启停不发成功变更事件");
 
   // 保存的项目根失效后，即便登记仍在，也不能改写父 Git 项目的同名文件。
   const parentSkill = join(temporary, "work", ".dsh", "skills", "route-repo", "SKILL.md");

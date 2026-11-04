@@ -1,4 +1,6 @@
-# dsh-loadout：loadout 功能设计契约（给实现者）
+# dsh-loadout：历史设计（v1–v3）
+
+> 下文保留历史设计依据。现行实现契约见 [会话优先的编组模型](session-first-design.md)；旧的整组启停、作用域默认、手动引用与守门人模式不再作为新模型的加载规则。
 
 你在这个仓库（fork 自 dsh-skills-manager 的 dsh 插件）里加一个新功能：**loadout**——命名的、跨来源的一组技能，能整组启用 / 停用 / 应用。先读这篇，再读代码里既有的 category 实现（它是最近的邻居，模式照抄它）。
 

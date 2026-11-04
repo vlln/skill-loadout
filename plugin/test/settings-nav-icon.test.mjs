@@ -202,7 +202,10 @@ test("插件卸载时的清理回调会移除图标并保留样式单例", async
   let cleanup = () => {};
   installSettingsNavIcon({ effect(run) { cleanup = run(); } }, () => "技能");
   assert.equal(button.getAttribute(NAV_ICON_MARKER), "");
-  assert.ok(doc.getElementById("dssm-settings-nav-icon-style"));
+  const style = doc.getElementById("dssm-settings-nav-icon-style");
+  assert.ok(style);
+  assert.match(style.textContent, /background-color:\s*var\(--dsw-alias-label-secondary\)/, "navigation card icon uses the host secondary label color rather than heavy inherited text color");
+  assert.doesNotMatch(style.textContent, /background-color:\s*currentColor\b/, "icon foreground must not regress to inherited primary text color");
 
   // 再次安装不应重复注入样式
   installSettingsNavIcon({ effect(run) { run(); } }, () => "技能");

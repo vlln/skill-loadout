@@ -1,6 +1,6 @@
 // composer 编组控件（conversation.input.dock）的客户端契约：
 // 注册形状（id/order/locale/inject(sessionId)）、收起态文案（有编组 / 未加载）、
-// popover 的单选项与生效技能清单、切换时的 POST、以及「在插件里管理」。
+// 原生多选与子菜单清单、切换 POST、主菜单无管理操作。
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
@@ -29,19 +29,22 @@ const loadouts = [
 ];
 const TEN_SKILLS = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa"];
 // 会话覆盖：null = 未选（回落 scope）、"" = 显式不加载、id = 选中。
-let stored = "lo1";
+let stored = ["lo1"];
 const calls = [];
 
 function view() {
-  const selected = stored === null ? "lo1" : stored;
+  const selected = stored.length === 1 ? stored[0] : null;
   const loadout = selected && selected !== "" ? loadouts.find((item) => item.id === selected) || null : null;
   return {
     sessionId: SESSION,
     scope: "user",
-    loadoutId: stored,
+    loadoutId: selected,
+    loadoutIds: stored,
     gatekeeper: true,
     effective: {
-      source: stored === "" ? "none" : stored === null ? "scope" : "session",
+      source: stored.length ? "session" : "none",
+      loadouts: loadouts.filter(item=>stored.includes(item.id)),
+      members: [],
       loadout,
       skills: loadout ? TEN_SKILLS : [],
     },
@@ -57,7 +60,7 @@ globalThis.fetch = async (url, options = {}) => {
   let data;
   if (path.startsWith("/session-loadout")) {
     if (method === "POST") {
-      stored = body.loadoutId === undefined ? null : body.loadoutId;
+      stored = body.loadoutIds;
       data = { sessionId: body.sessionId, loadoutId: stored, cleared: stored === null };
     } else data = view();
   } else if (path === "/loadouts") data = { scope: "user", loadouts, active: "lo1", gatekeeper: true };
@@ -159,37 +162,34 @@ try {
   render();
   const items = nodes().filter((node) => node.type === "button" && node.props.onClick && String(textOf(node)).length > 0);
   assert.ok(textOf(tree).includes("研发") && textOf(tree).includes("写作"), "列出两个编组");
-  assert.ok(textOf(tree).includes(t("loadout.dock.noLoadout")), "列表含「不加载」");
-  assert.ok(textOf(tree).includes(t("loadout.dock.manage")), "列表含「管理编组与技能」");
+  assert.ok(!textOf(tree).includes(t("loadout.dock.noLoadout")), "主菜单不含清空所有组入口");
+  assert.ok(!textOf(tree).includes(t("loadout.dock.manage")), "主菜单不含管理入口");
+  assert.ok(textOf(tree).includes(t("loadout.dock.showEffective",{count:10})), "生效名单使用子菜单入口");
 
-  // ── 切到「不加载」：POST { loadoutId: "" } ─────────────────────────────────
-  const noneItem = items.find((node) => textOf(node).includes(t("loadout.dock.noLoadout")));
-  noneItem.props.onClick();
+  // ── 切到「不加载」：POST { loadoutIds: [] } ─────────────────────────────────
+  const selectedItem = items.find((node) => textOf(node) === '研发');
+  selectedItem.props.onClick();
   await settle();
   const postNone = calls.filter((call) => call.path === "/session-loadout" && call.method === "POST").at(-1);
   assert.ok(postNone, "切换编组发起 POST /session-loadout");
-  assert.deepEqual(postNone.body, { sessionId: SESSION, loadoutId: "" }, "「不加载」写显式空串");
+  assert.deepEqual(postNone.body, { sessionId: SESSION, loadoutIds: [] }, "「不加载」写显式空串");
   assert.match(String(postNone.headers["x-dsh-loadout"]), /1/, "POST 带变更标记头");
   const noneTrigger = find((node) => node.props.className === "dssm-chip-trigger");
   assert.equal(textOf(noneTrigger).includes(t("loadout.dock.none")), true, "未加载时显示「未加载编组」");
 
   // ── 选回一个编组：POST 写入 id ─────────────────────────────────────────────
-  find((node) => node.props.className === "dssm-chip-trigger").props.onClick();
+  assert.equal(find((node) => node.props.className === "dssm-chip-trigger").props["aria-expanded"], true, "多选提交成功仍保持菜单打开");
   render();
   const back = nodes().find((node) => node.type === "button" && textOf(node) === "写作");
   back.props.onClick();
   await settle();
   const postBack = calls.filter((call) => call.path === "/session-loadout" && call.method === "POST").at(-1);
-  assert.deepEqual(postBack.body, { sessionId: SESSION, loadoutId: "lo2" }, "选编组写入它的 id");
+  assert.deepEqual(postBack.body, { sessionId: SESSION, loadoutIds: ["lo2"] }, "选编组写入它的 id");
 
-  // ── 「管理编组与技能」：就地弹模态框，不依赖侧栏 ───────────────────────────
-  find((node) => node.props.className === "dssm-chip-trigger").props.onClick();
-  render();
-  const manage = nodes().find((node) => node.type === "button" && textOf(node).includes(t("loadout.dock.manage")));
-  manage.props.onClick();
-  await settle();
-  const dialog = find((node) => node.props.role === "dialog" || node.props["data-modal"] === "dialog");
-  assert.ok(dialog, "管理入口直接就地在会话里弹出管理面板");
+  // Main menu remains focused on selection and native submenu entry points.
+  assert.equal(find(node=>node.props.className==='dssm-chip-trigger').props['aria-expanded'],true);
+  assert.equal(find(node=>node.props.role==='dialog'),undefined);
+  assert.ok(!textOf(tree).includes(t('loadout.create')));
 
   // 样式随控件自身渲染（composer 带不到面板里的 <style>）。
   const css = nodes().filter((node) => node.type === "style").map((node) => node.children.join("")).join("");

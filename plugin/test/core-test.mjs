@@ -25,6 +25,10 @@ import {
   unquote,
   parseBoolValue,
   renameWithRetry,
+  createLoadout,
+  setSessionLoadout,
+  setSessionSkillExclusions,
+  sessionLoadoutView,
   setSkillEnabled,
   setSourceEnabled,
   deleteSkill,
@@ -137,7 +141,7 @@ ok(
   ccswitchDefinition &&
     ccswitchDefinition.mutable === false &&
     ccswitchDefinition.toggleable === true,
-  "CC Switch source is read-only and locally toggleable",
+  "CC Switch retains read-only inventory metadata and legacy capability flag",
 );
 eq(
   ccswitchDefinition && ccswitchDefinition.rank,
@@ -153,11 +157,11 @@ ok(
   cursorDefinition &&
     cursorDefinition.mutable === false &&
     cursorDefinition.toggleable === true,
-  "Cursor source is read-only and locally toggleable",
+  "Cursor retains read-only inventory metadata and legacy capability flag",
 );
 eq(
   cursorDefinition && cursorDefinition.rank,
-  550,
+  userRoots().find(root => root.key === 'opencode').rank + 10,
   "Cursor source ranks after the existing app-specific roots",
 );
 const firstTierUserRoots = {
@@ -328,7 +332,7 @@ const clientSource = await readFile(
   "utf8",
 );
 ok(
-  clientBundle.includes('id: "@michengai/dsh-skills-manager"'),
+  clientBundle.includes('id: "dsh-loadout"'),
   "client registers the scoped package module ID",
 );
 ok(
@@ -359,17 +363,21 @@ ok(
   clientSource.includes('placeholder: t("search.placeholder")'),
   "settings panel registers a skill search input",
 );
-const filterRow = clientSource.slice(clientSource.indexOf('className: "dssm-filters"'));
+const filterRow = clientSource.slice(clientSource.indexOf("var skillControls ="));
+const classPosition = name => filterRow.search(new RegExp(`className\\s*:\\s*["']${name}["']`));
 ok(
-  filterRow.indexOf('className: "dssm-source-filter"') < filterRow.indexOf('className: "dssm-status-filter"') &&
-    filterRow.indexOf('className: "dssm-status-filter"') < filterRow.indexOf('className: "dssm-search"'),
-  "search sits on the same row after the compact source and status menus",
+  classPosition("dssm-source-filter") >= 0 &&
+    classPosition("dssm-source-filter") < classPosition("dssm-status-filter") &&
+    classPosition("dssm-status-filter") < classPosition("dssm-search") &&
+    classPosition("dssm-search") < classPosition("dssm-filter-actions"),
+  "compact inventory toolbar keeps filters, search and maintenance actions together",
 );
 ok(
   clientSource.includes("SegmentedTabs") &&
-    clientSource.includes("dssm-scope-tabs") &&
-    clientSource.includes('className: "dssm-sources"'),
-  "settings panel separates scopes and renders a skill list",
+    /className\s*:\s*["']dssm-inventory-section["']/.test(clientSource) &&
+    clientSource.includes("globalRoots.map(root=>renderRoot(root)).filter(Boolean)") &&
+    !clientSource.includes("renderSection(false),renderSection(true)"),
+  "library renders only global inventory; project controls belong to the chat session",
 );
 ok(
   clientSource.includes('"root.ccswitch": "CC Switch"') &&
@@ -699,173 +707,66 @@ eq(
   "parseSkillDoc preserves extra indentation on the second literal line",
 );
 
-// ── 启用 / 停用 ──
-const goodSkillSource =
-  "---\nname: good-skill\ndescription: A good skill.\n---\nbody";
+// ── Explicit session selection; legacy policy APIs cannot write hidden policy ──
+const policySession = "core-policy-session";
+let fixtureNumber = 0;
+async function selectMembers(members, options = {}, sessionId = policySession) {
+  // Project skills are cwd defaults, never group members. This helper selects only global fixtures.
+  const globalMembers = members.filter(member => !member.root.startsWith('project-'));
+  const result = await createLoadout(`Core fixture ${++fixtureNumber}`, null, globalMembers, undefined, options);
+  if (!result.loadout) throw new Error(`fixture creation failed: ${JSON.stringify(result)}`);
+  const selected = await setSessionLoadout(sessionId, result.loadout.id);
+  if (selected.ok === false) throw new Error(`fixture selection failed: ${JSON.stringify(selected)}`);
+  return result.loadout;
+}
+const member = (root, name) => ({ root, name });
+const selectedCandidates = (options = {}) => listProviderCandidates({ sessionId: policySession, ...options });
+const selectedState = (options = {}) => state({ sessionId: policySession, ...options });
+const goodSkillSource = "---\nname: good-skill\ndescription: A good skill.\n---\nbody";
 await makeSkill(dshRoot, "good-skill", goodSkillSource);
+eq((await state()).summary.enabled, 0, "installed inventory is not selected by default");
+await selectMembers([member("dsh", "good-skill")]);
+eq((await selectedState()).summary.enabled, 1, "explicit selection enables the valid member");
 const audit = [];
-await setSkillEnabled(dshRoot, "good-skill", false, (event) =>
-  audit.push(event),
-);
-eq(
-  await readFile(join(dshRoot, "good-skill", "SKILL.md"), "utf8"),
-  goodSkillSource,
-  "DSH disable leaves the original Skill file byte-for-byte unchanged",
-);
-eq(
-  audit.join(","),
-  "policy-disable",
-  "disable writes a local-policy audit event",
-);
-await setSkillEnabled(dshRoot, "good-skill", true, (event) =>
-  audit.push(event),
-);
-eq(
-  audit.join(","),
-  "policy-disable,policy-enable",
-  "enable writes a local-policy audit event",
-);
-eq(
-  await readFile(join(dshRoot, "good-skill", "SKILL.md"), "utf8"),
-  goodSkillSource,
-  "DSH enable also leaves the original Skill file unchanged",
-);
-await makeSkill(
-  dshRoot,
-  "crlf-skill",
-  "---\r\nname: crlf-skill\r\ndescription: CRLF skill.\r\n---\r\nbody",
-);
-const crlfBeforeToggle = await readFile(
-  join(dshRoot, "crlf-skill", "SKILL.md"),
-  "utf8",
-);
-await setSkillEnabled(dshRoot, "crlf-skill", false);
-const crlfAfterDisable = await readFile(
-  join(dshRoot, "crlf-skill", "SKILL.md"),
-  "utf8",
-);
-eq(
-  crlfAfterDisable,
-  crlfBeforeToggle,
-  "local-policy toggles do not normalize CRLF source files",
-);
-const quotedFrontmatter =
-  '---\nname: quoted-skill\ndescription: "Quoted description: unchanged"\nmetadata:\n  source: retained\n---\nbody';
-await makeSkill(dshRoot, "quoted-skill", quotedFrontmatter);
-await setSkillEnabled(dshRoot, "quoted-skill", false);
-await setSkillEnabled(dshRoot, "quoted-skill", true);
-const quotedAfterToggle = await readFile(
-  join(dshRoot, "quoted-skill", "SKILL.md"),
-  "utf8",
-);
-eq(
-  quotedAfterToggle,
-  quotedFrontmatter,
-  "toggle preserves quoted and nested frontmatter exactly",
-);
-const literalFrontmatter =
-  "---\nname: literal-skill\ndescription: |\n  disable-model-invocation: explanatory text\n  user-invocable: explanatory text\n---\nbody";
-await makeSkill(dshRoot, "literal-skill", literalFrontmatter);
-await setSkillEnabled(dshRoot, "literal-skill", false);
-const literalAfterToggle = await readFile(
-  join(dshRoot, "literal-skill", "SKILL.md"),
-  "utf8",
-);
-ok(
-  literalAfterToggle.includes("  disable-model-invocation: explanatory text") &&
-    literalAfterToggle.includes("  user-invocable: explanatory text"),
-  "toggle preserves block-scalar content that resembles policy fields",
-);
-await makeSkill(
-  dshRoot,
-  "trailing-root",
-  "---\nname: trailing-root\ndescription: Trailing root.\n---\nbody",
-);
-const trailingRootToggle = await setSkillEnabled(
-  dshRoot + sep,
-  "trailing-root",
-  false,
-);
-ok(
-  trailingRootToggle.ok !== false,
-  "toggle accepts a normalized DSH root path",
-);
-const missing = await setSkillEnabled(dshRoot, "no-such-skill", true);
-ok(missing.ok === false, "setSkillEnabled missing returns error");
-eq(
-  missing.code,
-  "error.skill.notFound",
-  "missing skill carries the notFound code",
-);
-eq(
-  missing.params && missing.params.name,
-  "no-such-skill",
-  "missing skill params.name",
-);
+eq((await setSkillEnabled(dshRoot, "good-skill", false, event => audit.push(event))).code, "error.policy.sessionOnly", "legacy disable is rejected");
+eq((await setSkillEnabled(dshRoot, "good-skill", true, event => audit.push(event))).inventoryOnly, true, "install compatibility hook is inventory-only");
+eq(audit.length, 0, "rejected/inert policy calls emit no policy audit");
+eq(await readFile(join(dshRoot, "good-skill", "SKILL.md"), "utf8"), goodSkillSource, "session policy preserves source bytes");
+for (const [name, text] of [
+  ["crlf-skill", "---\r\nname: crlf-skill\r\ndescription: CRLF skill.\r\n---\r\nbody"],
+  ["quoted-skill", '---\nname: quoted-skill\ndescription: "Quoted description: unchanged"\nmetadata:\n  source: retained\n---\nbody'],
+  ["literal-skill", "---\nname: literal-skill\ndescription: |\n  disable-model-invocation: explanatory text\n  user-invocable: explanatory text\n---\nbody"],
+  ["trailing-root", "---\nname: trailing-root\ndescription: Trailing root.\n---\nbody"],
+]) {
+  await makeSkill(dshRoot, name, text);
+  await selectMembers([member("dsh", name)]);
+  await setSessionLoadout(policySession, null);
+  eq(await readFile(join(dshRoot, name, "SKILL.md"), "utf8"), text, `select/clear preserves ${name} source exactly`);
+}
+eq((await setSkillEnabled(dshRoot + sep, "trailing-root", false)).code, "error.policy.sessionOnly", "normalized paths do not revive legacy toggles");
+const missing = await createLoadout("Missing member", null, [member("dsh", "no-such-skill")]);
+eq(missing.ok, false, "new selections reject missing inventory members");
 await makeSkill(dshRoot, "plain-skill", "没有 frontmatter 的正文");
-const plainToggle = await setSkillEnabled(dshRoot, "plain-skill", false);
-ok(
-  plainToggle.ok === false,
-  "setSkillEnabled rejects skills without frontmatter",
-);
-eq(
-  plainToggle.code,
-  "error.skill.noFrontmatter",
-  "no-frontmatter toggle carries the code",
-);
-eq(
-  plainToggle.params && plainToggle.params.action,
-  "disable",
-  "no-frontmatter params.action",
-);
-eq(
-  await readFile(join(dshRoot, "plain-skill", "SKILL.md"), "utf8"),
-  "没有 frontmatter 的正文",
-  "missing frontmatter remains unchanged",
-);
-await makeSkill(
-  dshRoot,
-  "missing-description",
-  "---\nname: missing-description\n---\nbody",
-);
-const incompleteToggle = await setSkillEnabled(
-  dshRoot,
-  "missing-description",
-  true,
-);
-ok(
-  incompleteToggle.ok === false,
-  "setSkillEnabled rejects structurally incomplete skills even when called outside the UI",
-);
-eq(
-  incompleteToggle.code,
-  "error.skill.notLoadable",
-  "structurally incomplete toggle carries the notLoadable code",
-);
-await makeSkill(
-  dshRoot,
-  "skill-scan",
-  "---\nname: SkillScan\ndescription: Security gate for skills.\n---\nbody\n",
-);
-const titledToggle = await setSkillEnabled(dshRoot, "skill-scan", true);
-ok(
-  titledToggle.ok !== false && titledToggle.enabled === true,
-  "frontmatter title SkillScan can be enabled under its kebab folder name",
-);
-const titledState = await state();
-const titledSkill = titledState.roots.flatMap((root) => root.skills || []).find((skill) => skill.name === "skill-scan");
-ok(titledSkill && titledSkill.loadable !== false, "a title-case frontmatter name does not make the installed skill invalid");
-// 同一声明名不因嵌套路径变化；候选名称必须满足宿主 kebab-case 契约。
+await makeSkill(dshRoot, "missing-description", "---\nname: missing-description\n---\nbody");
+await selectMembers([member("dsh", "plain-skill"), member("dsh", "missing-description")]);
+const invalidMembers = (await sessionLoadoutView(policySession)).effective.members;
+ok(invalidMembers.every(item => item.status === "invalid"), "selection cannot make structurally invalid members loadable");
+eq((await sessionLoadoutView(policySession)).effective.skills.length, 0, "invalid members never enter effective skill list");
+eq(await readFile(join(dshRoot, "plain-skill", "SKILL.md"), "utf8"), "没有 frontmatter 的正文", "missing frontmatter remains unchanged");
+await makeSkill(dshRoot, "skill-scan", "---\nname: SkillScan\ndescription: Security gate for skills.\n---\nbody\n");
+await selectMembers([member("dsh", "skill-scan")]);
+eq((await sessionLoadoutView(policySession)).effective.skills[0], "skill-scan", "selected title-case declaration canonicalizes to kebab case");
 for (const name of ["nested-title-scan", "team/nested-title-scan"]) {
   await makeSkill(codexRoot, name, "---\nname: NestedTitleScan\ndescription: 嵌套标题名回归。\n---\n正文\n");
 }
-const nestedTitleSkills = (await state()).roots.flatMap(root => root.skills || []).filter(skill => skill.declaredName === "NestedTitleScan");
-eq(nestedTitleSkills.filter(skill => skill.winner).length, 1, "嵌套与顶层的同声明名只产生一个 winner");
-eq(nestedTitleSkills.find(skill => skill.winner)?.canonicalName, "nested-title-scan", "嵌套路径不改变 winner 的规整调用名");
-ok(nestedTitleSkills.some(skill => skill.shadowedBy?.name === "nested-title-scan"), "嵌套副本遵循同名遮蔽规则");
-const nestedTitleCandidates = (await listProviderCandidates()).filter(candidate => candidate.locator?.entryName?.includes("nested-title-scan"));
-eq(nestedTitleCandidates.length, 1, "provider 将嵌套同名技能合并为单个候选");
-ok(nestedTitleCandidates.every(candidate => candidate.name === "nested-title-scan"), "provider 不返回宿主拒绝的大写名称");
+await selectMembers([member("codex", "nested-title-scan"), member("codex", "team/nested-title-scan")]);
+const nestedTitleSkills = (await selectedState()).roots.flatMap(root => root.skills || []).filter(skill => skill.declaredName === "NestedTitleScan");
+eq(nestedTitleSkills.filter(skill => skill.winner).length, 1, "selected same-name nested copies produce one winner");
+eq(nestedTitleSkills.find(skill => skill.winner)?.canonicalName, "nested-title-scan", "nesting does not change canonical name");
+ok(nestedTitleSkills.some(skill => skill.shadowedBy?.name === "nested-title-scan"), "nested copy reports shadowing");
+const nestedTitleCandidates = (await selectedCandidates()).filter(candidate => candidate.locator?.entryName?.includes("nested-title-scan"));
+eq(nestedTitleCandidates.length, 1, "provider merges nested duplicate candidates");
+ok(nestedTitleCandidates.every(candidate => candidate.name === "nested-title-scan"), "provider rejects uppercase invocation names");
 for (const name of ["nested-title-scan", "team/nested-title-scan"]) await rm(join(codexRoot, name), { recursive: true });
 
 // ── 中文技能与混排技能保真回归（Issue #53）──
@@ -930,42 +831,20 @@ eq(guoziranSkill.diagnostics.length, 1, "中文技能带有格式诊断提示");
 eq(guoziranSkill.diagnostics[0].code, "diagnostic.name.invalid", "中文技能诊断代码为 diagnostic.name.invalid");
 eq(guoziranSkill.declaredName, "国自然申请书自检", "中文技能 declaredName 保留真实中文名");
 
-const cantEnableChinese = await setSkillEnabled(dshRoot, "国自然申请书自检", true);
-ok(cantEnableChinese.ok === false, "宿主不接受格式的技能禁止开启启用");
-eq(cantEnableChinese.code, "error.skill.notLoadable", "禁止启用时返回 notLoadable 错误码");
-
-// 模拟历史残留已开启的技能：能够成功执行停用以清理状态
+await selectMembers([member("dsh", "国自然申请书自检")]);
+eq((await sessionLoadoutView(policySession)).effective.members[0].status, "invalid", "selected Chinese invocation name remains invalid");
+// Legacy references remain available for explicit migration, never silently cleaned by toggles.
 const managerStateFile = managerStatePath();
 const rawState = JSON.parse(await readFile(managerStateFile, "utf8"));
-rawState.enabledSkills = rawState.enabledSkills || {};
-rawState.enabledSkills.dsh = [...(rawState.enabledSkills.dsh || []), "国自然申请书自检"];
+rawState.enabledSkills.dsh = ["国自然申请书自检", "broken-frontmatter-skill", "ghost-deleted-skill"];
 await writeFile(managerStateFile, JSON.stringify(rawState, null, 2), "utf8");
-
-const canDisableChinese = await setSkillEnabled(dshRoot, "国自然申请书自检", false);
-ok(canDisableChinese.ok !== false && canDisableChinese.enabled === false, "历史残留开启的非规范技能允许执行停用，彻底清理开启状态");
-
-// 幂等停用：再次停用已在 disabled 的不可加载技能返回成功
-const idempotentDisable = await setSkillEnabled(dshRoot, "国自然申请书自检", false);
-ok(idempotentDisable.ok !== false && idempotentDisable.enabled === false, "已停用的非规范技能重复停用幂等返回成功");
-
-// frontmatter 改坏但历史残留已启用的技能：允许执行停用以清理状态
 await makeSkill(dshRoot, "broken-frontmatter-skill", "没有 frontmatter 的损坏技能");
-const rawState2 = JSON.parse(await readFile(managerStateFile, "utf8"));
-rawState2.enabledSkills.dsh = [...(rawState2.enabledSkills.dsh || []), "broken-frontmatter-skill"];
-await writeFile(managerStateFile, JSON.stringify(rawState2, null, 2), "utf8");
-
-const canDisableBroken = await setSkillEnabled(dshRoot, "broken-frontmatter-skill", false);
-ok(canDisableBroken.ok !== false && canDisableBroken.enabled === false, "frontmatter 损坏但历史开启的技能允许执行停用清理");
-
-// 磁盘已删除/改名但 enabledSkills 残留旧名的技能：执行停用能够成功清理
-const rawState3 = JSON.parse(await readFile(managerStateFile, "utf8"));
-rawState3.enabledSkills.dsh = [...(rawState3.enabledSkills.dsh || []), "ghost-deleted-skill"];
-await writeFile(managerStateFile, JSON.stringify(rawState3, null, 2), "utf8");
-
-const canDisableGhost = await setSkillEnabled(dshRoot, "ghost-deleted-skill", false);
-ok(canDisableGhost.ok !== false && canDisableGhost.enabled === false, "磁盘已删除但开启残留的技能允许执行停用注销");
-const afterGhostState = JSON.parse(await readFile(managerStateFile, "utf8"));
-ok(!afterGhostState.enabledSkills.dsh.includes("ghost-deleted-skill"), "残留旧名从 enabledSkills 中成功清除");
+const legacyBefore = await readFile(managerStateFile, "utf8");
+for (const name of rawState.enabledSkills.dsh) {
+  eq((await setSkillEnabled(dshRoot, name, false)).code, "error.policy.sessionOnly", `legacy disable rejected for ${name}`);
+}
+eq(await readFile(managerStateFile, "utf8"), legacyBefore, "rejected toggles preserve invalid and dangling legacy references");
+eq((await state()).summary.enabled, 0, "legacy references do not load skills without session selection");
 
 const cSkill = allIssue53Skills.find(s => s.name === "C盘清理顾问");
 const dSkill = allIssue53Skills.find(s => s.name === "D盘清理顾问");
@@ -1020,184 +899,48 @@ await makeSkill(
   "public-skill",
   "---\nname: public-skill\ndescription: Public skill.\n---\nbody",
 );
-const publicToggle = await setSkillEnabled(agentsRoot, "public-skill", false);
-ok(
-  publicToggle.ok !== false && publicToggle.enabled === false,
-  "public Agent skill supports manager-local disable",
-);
-const publicDoc = parseSkillDoc(
-  await readFile(join(agentsRoot, "public-skill", "SKILL.md"), "utf8"),
-);
-ok(
-  publicDoc.map["disable-model-invocation"] === undefined,
-  "public skill metadata remains unchanged",
-);
-
-const sourceDisabledText =
-  "---\nname: source-disabled\ndescription: Disabled in source.\ndisable-model-invocation: true\nuser-invocable: false\n---\nSource-disabled body";
+eq((await setSkillEnabled(agentsRoot, "public-skill", false)).code, "error.policy.sessionOnly", "public Agent legacy toggle rejected");
+const publicDoc = parseSkillDoc(await readFile(join(agentsRoot, "public-skill", "SKILL.md"), "utf8"));
+ok(publicDoc.map["disable-model-invocation"] === undefined, "public skill metadata remains unchanged");
+const sourceDisabledText = "---\nname: source-disabled\ndescription: Disabled in source.\ndisable-model-invocation: true\nuser-invocable: false\n---\nSource-disabled body";
 await makeSkill(dshRoot, "source-disabled", sourceDisabledText);
-await setSkillEnabled(dshRoot, "source-disabled", true);
-eq(
-  await readFile(join(dshRoot, "source-disabled", "SKILL.md"), "utf8"),
-  sourceDisabledText,
-  "manager enable does not remove source-level disabled fields",
-);
-let dshPolicyCandidate = (await listProviderCandidates()).find(
-  (item) => item.source === "user-dsh" && item.name === "source-disabled",
-);
-ok(
-  dshPolicyCandidate &&
-    dshPolicyCandidate.rank === 399 &&
-    dshPolicyCandidate.invocation.modelInvocable === false &&
-    dshPolicyCandidate.invocation.userInvocable === false,
-  "explicit manager enable does not elevate source-level disabled fields (#43, #51)",
-);
-let managerStateNow = await state();
-let sourceDisabledView = managerStateNow.roots
-  .find((r) => r.key === "dsh")
-  ?.skills.find((s) => s.name === "source-disabled");
-ok(
-  sourceDisabledView &&
-    sourceDisabledView.enabled === true &&
-    sourceDisabledView.effectiveModelInvocable === false &&
-    sourceDisabledView.effectiveUserInvocable === false,
-  "manager enable opens gatekeeper without overriding source-level invocation restrictions (#43, #51)",
-);
-
-// ── 回归测试：Issue #43 & #51 (尊重 disable-model-invocation: true，总闸开启不篡改权限) ──
-const manualOnlyText =
-  "---\nname: manual-only\ndescription: Only invoked by user.\ndisable-model-invocation: true\n---\nManual only body";
+const manualOnlyText = "---\nname: manual-only\ndescription: Only invoked by user.\ndisable-model-invocation: true\n---\nManual only body";
 await makeSkill(dshRoot, "manual-only", manualOnlyText);
-let manualState = await state();
-let manualView = manualState.roots
-  .find((r) => r.key === "dsh")
-  ?.skills.find((s) => s.name === "manual-only");
-ok(
-  manualView &&
-    manualView.enabled === true &&
-    manualView.effectiveModelInvocable === false &&
-    manualView.effectiveUserInvocable === true,
-  "installed manual-only skill respects disable-model-invocation: true (#51)",
-);
-// 测试拨动总闸关闭与重新开启（#43）
-await setSkillEnabled(dshRoot, "manual-only", false);
-let manualDisabledCandidate = (await listProviderCandidates()).find(
-  (item) => item.source === "user-dsh" && item.name === "manual-only",
-);
-ok(
-  manualDisabledCandidate &&
-    manualDisabledCandidate.rank === 399 &&
-    manualDisabledCandidate.invocation.modelInvocable === false &&
-    manualDisabledCandidate.invocation.userInvocable === false,
-  "disabling manual-only skill globally blocks all invocation via rank 399",
-);
-await setSkillEnabled(dshRoot, "manual-only", true);
-let manualReenabledState = await state();
-let manualReenabledView = manualReenabledState.roots
-  .find((r) => r.key === "dsh")
-  ?.skills.find((s) => s.name === "manual-only");
-ok(
-  manualReenabledView &&
-    manualReenabledView.enabled === true &&
-    manualReenabledView.effectiveModelInvocable === false &&
-    manualReenabledView.effectiveUserInvocable === true,
-  "reenabling manual-only skill perfectly restores frontmatter inheritance (#43)",
-);
-let manualReenabledCandidate = (await listProviderCandidates()).find(
-  (item) => item.source === "user-dsh" && item.name === "manual-only",
-);
-ok(
-  manualReenabledCandidate &&
-    manualReenabledCandidate.invocation.modelInvocable === false &&
-    manualReenabledCandidate.invocation.userInvocable === true,
-  "reenabled candidate keeps model invocation disabled while permitting slash commands (#43, #51)",
-);
+await selectMembers([member("dsh", "source-disabled"), member("dsh", "manual-only")]);
+const sourceDisabledView = (await sessionLoadoutView(policySession)).effective.members.find(item => item.name === "source-disabled");
+eq(sourceDisabledView.status, "invalid", "selection never overrides both source channels disabled");
+let manualCandidate = (await selectedCandidates()).find(item => item.name === "manual-only");
+ok(manualCandidate && !manualCandidate.invocation.modelInvocable && manualCandidate.invocation.userInvocable, "selected manual-only skill retains source restrictions");
+await setSessionLoadout(policySession, null);
+manualCandidate = (await selectedCandidates()).find(item => item.name === "manual-only");
+ok(manualCandidate && !manualCandidate.invocation.modelInvocable && !manualCandidate.invocation.userInvocable, "cleared session blocks both invocation channels");
+await selectMembers([member("dsh", "manual-only")]);
+manualCandidate = (await selectedCandidates()).find(item => item.name === "manual-only");
+ok(manualCandidate && !manualCandidate.invocation.modelInvocable && manualCandidate.invocation.userInvocable, "reselection restores only source-permitted channel");
+eq(await readFile(join(dshRoot, "source-disabled", "SKILL.md"), "utf8"), sourceDisabledText, "source-disabled metadata unchanged");
+eq(await readFile(join(dshRoot, "manual-only", "SKILL.md"), "utf8"), manualOnlyText, "manual-only metadata unchanged");
 
-// ── 外部来源 provider 与本地策略 ──
-await makeSkill(
-  codexRoot,
-  "code-review",
-  "---\nname: code-review\ndescription: Review code safely.\n---\nCodex review body",
-);
-let providerCandidates = await listProviderCandidates();
-const codexCandidate = providerCandidates.find(
-  (item) => item.source === "agent-codex" && item.name === "code-review",
-);
-ok(
-  codexCandidate && codexCandidate.invocation.modelInvocable === true,
-  "Codex skill is exposed to the DSH provider",
-);
-eq(
-  codexCandidate.rank,
-  510,
-  "Codex provider rank stays below native DSH and public Agents",
-);
-const loadedCodex = await getProviderSkill(codexCandidate);
-eq(
-  loadedCodex.content,
-  "Codex review body",
-  "provider loads the external skill body",
-);
-
-await makeSkill(
-  cursorRoot,
-  "cursor-review",
-  "---\nname: cursor-review\ndescription: Review code in Cursor.\n---\nCursor review body",
-);
-const cursorCandidate = (await listProviderCandidates()).find(
-  (item) => item.source === "agent-cursor" && item.name === "cursor-review",
-);
-ok(
-  cursorCandidate && cursorCandidate.invocation.modelInvocable === true,
-  "Cursor skill is exposed to the DSH provider",
-);
-eq(
-  cursorCandidate && cursorCandidate.rank,
-  550,
-  "Cursor provider rank follows the existing external sources",
-);
-await setSkillEnabled(cursorRoot, "cursor-review", false);
-const disabledCursorCandidate = (await listProviderCandidates()).find(
-  (item) => item.source === "agent-cursor" && item.name === "cursor-review",
-);
-ok(
-  disabledCursorCandidate &&
-    disabledCursorCandidate.invocation.modelInvocable === false,
-  "Cursor skill supports manager-local disable",
-);
-ok(
-  !(
-    await readFile(join(cursorRoot, "cursor-review", "SKILL.md"), "utf8")
-  ).includes("disable-model-invocation"),
-  "Cursor skill policy never modifies the source file",
-);
-await setSkillEnabled(cursorRoot, "cursor-review", true);
-await setSourceEnabled("cursor", false);
-const disabledCursorSource = (await listProviderCandidates()).find(
-  (item) => item.source === "agent-cursor" && item.name === "cursor-review",
-);
-ok(
-  !disabledCursorSource,
-  "disabled Cursor source does not contribute a shadowing candidate",
-);
-await setSourceEnabled("cursor", true);
-
-await setSourceEnabled("dsh", false);
-const disabledDshSource = (await listProviderCandidates()).find(
-  (item) => item.source === "user-dsh",
-);
-ok(
-  disabledDshSource &&
-    disabledDshSource.invocation.userInvocable === false,
-  "DSH source supports manager-local source disable",
-);
-const dshRootViewDisabled = (await state()).roots.find((r) => r.key === "dsh");
-ok(dshRootViewDisabled && dshRootViewDisabled.enabled === false, "dsh root view reports disabled");
-ok((await readManagerState()).state.sources.dsh === false, "sources.dsh is written to state.json");
-await setSourceEnabled("dsh", true);
-const dshRootViewEnabled = (await state()).roots.find((r) => r.key === "dsh");
-ok(dshRootViewEnabled && dshRootViewEnabled.enabled === true, "dsh root view reports enabled");
-ok((await readManagerState()).state.sources.dsh === true, "sources.dsh restore works");
+// ── External inventory becomes available only to the selected session ──
+await makeSkill(codexRoot, "code-review", "---\nname: code-review\ndescription: Review code safely.\n---\nCodex review body");
+await makeSkill(cursorRoot, "cursor-review", "---\nname: cursor-review\ndescription: Review code in Cursor.\n---\nCursor review body");
+await selectMembers([member("codex", "code-review"), member("cursor", "cursor-review")]);
+let providerCandidates = await selectedCandidates();
+const codexCandidate = providerCandidates.find(item => item.source === "agent-codex" && item.name === "code-review");
+ok(codexCandidate?.invocation.modelInvocable, "selected Codex skill is exposed");
+eq(codexCandidate.rank, 510, "Codex rank below native DSH and public Agents");
+eq((await getProviderSkill(codexCandidate, { sessionId: policySession })).content, "Codex review body", "provider loads external body");
+const cursorCandidate = providerCandidates.find(item => item.name === "cursor-review");
+ok(cursorCandidate?.invocation.modelInvocable, "selected Cursor skill is exposed");
+eq(cursorCandidate?.rank, cursorDefinition.rank, "Cursor rank follows configured source priority");
+const beforeRejectedSources = await readFile(managerStatePath(), "utf8");
+for (const key of ["cursor", "dsh", "codex", "ccswitch"]) {
+  for (const enabled of [false, true]) eq((await setSourceEnabled(key, enabled)).code, "error.policy.sessionOnly", `legacy source toggle ${key}/${enabled} rejected`);
+}
+eq(await readFile(managerStatePath(), "utf8"), beforeRejectedSources, "legacy source toggles never persist hidden policy");
+ok((await selectedCandidates()).find(item => item.name === "cursor-review")?.invocation.modelInvocable, "rejected source toggle does not change session selection");
+await selectMembers([member("codex", "code-review")]);
+ok(!(await selectedCandidates()).find(item => item.name === "cursor-review")?.invocation.modelInvocable, "excluding Cursor member blocks it without hiding inventory");
+ok(!(await readFile(join(cursorRoot, "cursor-review", "SKILL.md"), "utf8")).includes("disable-model-invocation"), "selection never modifies external source file");
 
 // CC Switch 以固定 SSOT 保存技能，并把顶层技能目录链接到各 Agent 来源。
 const ccswitchSkill = await makeSkill(
@@ -1235,7 +978,7 @@ if (await tryLink(ccswitchSkill, linkedCcSwitchSkill, providerLinkType)) {
     ccswitchView &&
       ccswitchView.enabled === true &&
       ccswitchView.skills.some((skill) => skill.name === "ccswitch-shared"),
-    "CC Switch source is enabled by default and owns its SSOT Skill",
+    "CC Switch inventory source stays visible and owns its SSOT Skill",
   );
   ok(
     codexView &&
@@ -1253,7 +996,8 @@ if (await tryLink(ccswitchSkill, linkedCcSwitchSkill, providerLinkType)) {
     "detail keeps the direct CC Switch SSOT visible without scanning unrelated skill documents",
   );
 
-  const ccswitchCandidates = (await listProviderCandidates()).filter(
+  await selectMembers([member("ccswitch", "ccswitch-shared")]);
+  const ccswitchCandidates = (await selectedCandidates()).filter(
     (item) => item.name === "ccswitch-shared",
   );
   eq(
@@ -1281,8 +1025,8 @@ if (await tryLink(ccswitchSkill, linkedCcSwitchSkill, providerLinkType)) {
   );
   eq(
     disabledCcSwitchCandidates.length,
-    0,
-    "disabling CC Switch does not restore its Codex distribution link as another candidate",
+    1,
+    "rejected CC Switch toggle preserves its canonical inventory candidate",
   );
   await setSourceEnabled("ccswitch", true);
 
@@ -1290,7 +1034,7 @@ if (await tryLink(ccswitchSkill, linkedCcSwitchSkill, providerLinkType)) {
     name: linkedCodexEntry.declaredName,
     description: linkedCodexEntry.description,
     invocation: { modelInvocable: true, userInvocable: true },
-    provider: "dsh-skills-manager-external",
+    provider: "dsh-loadout-external",
     source: "agent-codex",
     locator: {
       rootKey: "codex",
@@ -1304,9 +1048,9 @@ if (await tryLink(ccswitchSkill, linkedCcSwitchSkill, providerLinkType)) {
     metadata: {},
   };
   eq(
-    (await getProviderSkill(linkedCandidate)).content,
-    "CC Switch body",
-    "provider accepts an unchanged trusted linked candidate",
+    await getProviderSkill(linkedCandidate),
+    undefined,
+    "provider rejects a fabricated distribution alias instead of bypassing the canonical winner",
   );
   const missingRealEntryLocator = {
     ...linkedCandidate,
@@ -1403,7 +1147,7 @@ if (await tryLink(writableLinkOutside, writableTrustedLink, providerLinkType)) {
   });
   eq(refusedCreate.code, "error.create.conflict", "create does not replace a directory link");
   const disabledLink = await setSkillEnabled(dshRoot, "ccswitch-linked-dsh", false);
-  eq(disabledLink.enabled, false, "disable only changes manager policy");
+  eq(disabledLink.code, "error.policy.sessionOnly", "linked legacy toggle cannot mutate policy");
   await setSkillEnabled(dshRoot, "ccswitch-linked-dsh", true);
   eq(
     await readFile(join(writableLinkOutside, "SKILL.md"), "utf8"),
@@ -1493,6 +1237,18 @@ if (await tryLink(readonlyOutsideSkill, outsideLinkedSkill, providerLinkType)) {
     ),
     "只读扫描默认跟随外部目录链接",
   );
+  await selectMembers([member("codex", "outside-linked")]);
+  const discoveredLink = (await selectedCandidates()).find(item => item.name === "outside-linked");
+  eq((await getProviderSkill(discoveredLink, { sessionId: policySession }))?.content, "Outside body", "selected discovered directory link loads its unchanged real target");
+  for (const field of ["realEntryPath", "realDocPath"]) {
+    const incompleteLocator = { ...discoveredLink, locator: { ...discoveredLink.locator } };
+    delete incompleteLocator.locator[field];
+    eq(await getProviderSkill(incompleteLocator, { sessionId: policySession }), undefined, `selected link rejects missing ${field}`);
+  }
+  const replacedLinkTarget = await makeSkill(readonlyOutsideRoot, "replacement", "---\nname: outside-linked\ndescription: Changed target.\n---\nReplacement body");
+  await rm(outsideLinkedSkill, { recursive: true, force: true });
+  await symlink(replacedLinkTarget, outsideLinkedSkill, providerLinkType);
+  eq(await getProviderSkill(discoveredLink, { sessionId: policySession }), undefined, "selected cached link rejects a retargeted real document");
   await rm(outsideLinkedSkill, { recursive: true, force: true });
 } else {
   ok(
@@ -1548,7 +1304,8 @@ if (await tryLink(ccswitchAgentSkill, linkedAgentSkill, providerLinkType)) {
       ),
     "state hides the public Agent distribution link owned by CC Switch",
   );
-  let linkedAgentCandidates = (await listProviderCandidates()).filter(
+  await selectMembers([member("ccswitch", "ccswitch-agent-owned")]);
+  let linkedAgentCandidates = (await selectedCandidates()).filter(
     (item) => item.name === "ccswitch-agent-owned",
   );
   eq(
@@ -1575,7 +1332,7 @@ if (await tryLink(ccswitchAgentSkill, linkedAgentSkill, providerLinkType)) {
       linkedAgentCandidates[0].source === "agent-ccswitch" &&
       linkedAgentCandidates[0].invocation.modelInvocable === false &&
       linkedAgentCandidates[0].invocation.userInvocable === false,
-    "disabling CC Switch keeps a disabled canonical blocker instead of falling back to public Agents",
+    "without session context the canonical CC Switch candidate blocks public Agent fallback",
   );
   await setSourceEnabled("ccswitch", true);
   await rm(linkedAgentSkill, { recursive: true, force: true });
@@ -1619,17 +1376,17 @@ if (
       migratedPolicyCandidates[0].source === "agent-ccswitch" &&
       migratedPolicyCandidates[0].invocation.modelInvocable === false &&
       migratedPolicyCandidates[0].invocation.userInvocable === false,
-    "a Codex disable remains effective after the entry becomes a CC Switch distribution link",
+    "unselected distribution link remains blocked after changing canonical ownership",
   );
-  await setSkillEnabled(ccswitchRoot, "policy-migration", true);
-  const explicitlyEnabledMigration = (await listProviderCandidates()).find(
+  await selectMembers([member("ccswitch", "policy-migration")]);
+  const explicitlyEnabledMigration = (await selectedCandidates()).find(
     (item) => item.name === "policy-migration",
   );
   ok(
     explicitlyEnabledMigration &&
       explicitlyEnabledMigration.invocation.modelInvocable === true &&
       explicitlyEnabledMigration.invocation.userInvocable === true,
-    "an explicit canonical CC Switch enable overrides an inherited distribution-link disable",
+    "explicit canonical CC Switch session selection makes distribution available",
   );
   await rm(codexPolicyMigrationLink, { recursive: true, force: true });
 } else {
@@ -1682,22 +1439,12 @@ ok(
     Array.isArray(migratedLegacyState.state.enabledSkills.dsh),
   "legacy state without enabledSkills or a DSH policy list is normalized compatibly",
 );
-ok(
-  migratedLegacyState.state.sources.ccswitch === true &&
-    Array.isArray(migratedLegacyState.state.disabledSkills.ccswitch),
-  "legacy state gains a default-enabled CC Switch source without failing closed",
-);
-ok(
-  migratedLegacyState.state.sources.antigravity === true &&
-    Array.isArray(migratedLegacyState.state.disabledSkills.antigravity),
-  "legacy state gains a default-enabled Google Antigravity source without failing closed",
-);
-ok(
-  migratedLegacyState.state.sources.cursor === true &&
-    Array.isArray(migratedLegacyState.state.disabledSkills.cursor) &&
-    Array.isArray(migratedLegacyState.state.enabledSkills.cursor),
-  "legacy state gains a default-enabled Cursor source without failing closed",
-);
+for (const key of ["ccswitch", "antigravity", "cursor"]) {
+  eq(migratedLegacyState.state.sources[key], undefined, `absent legacy source ${key} remains opaque migration data`);
+  eq(migratedLegacyState.state.disabledSkills[key], undefined, `absent legacy exclusions ${key} are not manufactured`);
+}
+eq(await readFile(managerStatePath(), "utf8"), JSON.stringify(legacyManagerState), "reading legacy state never persists normalization");
+eq((await state()).summary.enabled, 0, "missing legacy source defaults cannot enable unselected inventory");
 const conflictingManagerState = JSON.parse(validManagerState);
 conflictingManagerState.disabledSkills.dsh = ["good-skill"];
 conflictingManagerState.enabledSkills.dsh = ["good-skill"];
@@ -1707,8 +1454,8 @@ await writeFile(
   "utf8",
 );
 ok(
-  (await readManagerState()).writable === false,
-  "conflicting enabled and disabled policy entries fail closed",
+  (await readManagerState()).writable === true,
+  "conflicting legacy policy entries are inert rather than corrupting session state",
 );
 await writeFile(managerStatePath(), validManagerState, "utf8");
 await writeFile(managerStatePath(), "{broken", "utf8");
@@ -1726,8 +1473,8 @@ ok(
 const rejectedStateToggle = await setSourceEnabled("codex", true);
 eq(
   rejectedStateToggle.code,
-  "error.state.invalid",
-  "source toggle refuses to overwrite an invalid manager state file",
+  "error.policy.sessionOnly",
+  "retired source toggle rejects before any invalid-state write",
 );
 eq(
   await readFile(managerStatePath(), "utf8"),
@@ -1736,8 +1483,8 @@ eq(
 );
 providerCandidates = await listProviderCandidates();
 ok(
-  !providerCandidates.some((item) => item.name === "code-review"),
-  "provider omits external candidates while manager state is invalid",
+  providerCandidates.filter((item) => item.name === "code-review").every(item => !item.invocation.modelInvocable && !item.invocation.userInvocable),
+  "invalid manager state never exposes callable external candidates",
 );
 ok(
   providerCandidates.find(
@@ -2670,20 +2417,20 @@ const invalidPolicySource = await readFile(
   join(dshRoot, "invalid-policy", "SKILL.md"),
   "utf8",
 );
-await setSkillEnabled(dshRoot, "invalid-policy", true);
+await selectMembers([member("dsh", "invalid-policy")]);
 eq(
   await readFile(join(dshRoot, "invalid-policy", "SKILL.md"), "utf8"),
   invalidPolicySource,
   "enabling a Skill with invalid source invocation fields does not repair or rewrite the source",
 );
-const invalidPolicyOverlay = (await listProviderCandidates()).find(
+const invalidPolicyOverlay = (await selectedCandidates()).find(
   (item) => item.source === "user-dsh" && item.name === "invalid-policy",
 );
 ok(
   invalidPolicyOverlay &&
-    invalidPolicyOverlay.invocation.modelInvocable === true &&
-    invalidPolicyOverlay.invocation.userInvocable === true,
-  "explicit local enable overrides invalid source invocation fields",
+    invalidPolicyOverlay.invocation.modelInvocable === false &&
+    invalidPolicyOverlay.invocation.userInvocable === false,
+  "session selection cannot override invalid source invocation fields",
 );
 await writeFile(
   join(dshRoot, "UPPER.MD"),
@@ -2807,7 +2554,7 @@ eq(batch.imported.length, 2, "import batch dir");
   );
   eq(
     registered[0].provider.name,
-    "dsh-skills-manager-external",
+    "dsh-loadout-external",
     "agent-scoped provider keeps the manager provider identity",
   );
   eq(invalidators.size, 1, "agent-scoped provider contributes an invalidator");
@@ -2956,7 +2703,7 @@ try {
     httpProjectRoot &&
       httpProjectRoot.mutable === false &&
       httpProjectRoot.toggleable === true,
-    "state route exposes project Agent files as read-only with manager-local toggles",
+    "state route preserves read-only project Agent inventory metadata",
   );
   ok(
     httpProjectRoot.skills.some(
@@ -3001,12 +2748,12 @@ try {
   );
   eq(
     projectToggleResponse.status,
-    200,
-    "project Agent skills support manager-local disable",
+    400,
+    "project Agent legacy disable is rejected",
   );
   ok(
-    projectToggleResponse.payload.data.enabled === false,
-    "project Agent disable returns the local policy state",
+    projectToggleResponse.payload.code === "error.policy.sessionOnly",
+    "project Agent disable returns explicit migration error",
   );
   eq(
     await readFile(
@@ -3022,6 +2769,11 @@ try {
     projectAgentSourceBeforeToggle,
     "project Agent disable never rewrites the shared source file",
   );
+  const defaultProjectState = await (await fetch(api + "/state", { headers: secureHeaders })).json();
+  ok(defaultProjectState.data.roots.find(root => root.key === httpProjectRoot.key).skills.find(skill => skill.name === "route-project-skill").enabled, "rejected legacy disable leaves current project default available");
+  const exclusionResponse = await requestJson(api + "/session-skill-exclusions", "POST", secureHeaders,
+    JSON.stringify({ sessionId: "sess-live", excludedSkills: [member(httpProjectRoot.key, "route-project-skill")] }));
+  eq(exclusionResponse.status, 200, "explicit session exclusion disables a project default");
   const disabledProjectState = await (await fetch(api + "/state", { headers: secureHeaders })).json();
   const disabledProjectAgent = disabledProjectState.data.roots
     .find((root) => root.key === httpProjectRoot.key)
@@ -3029,10 +2781,10 @@ try {
   ok(
     disabledProjectAgent.managerEnabled === false &&
       disabledProjectAgent.enabled === false,
-    "state reports the project Agent policy as disabled",
+    "state reports the explicitly excluded project Agent member as disabled",
   );
   let projectPolicyCandidates = await listProviderCandidates({
-    cwd: routeProjectNested,
+    sessionId: "sess-live", cwd: routeProjectNested,
   });
   const projectPolicyBlocker = projectPolicyCandidates.find(
     (item) =>
@@ -3051,7 +2803,7 @@ try {
     "project policy candidates retain their discovered real bundle and document paths",
   );
   eq(
-    (await getProviderSkill(projectPolicyBlocker, { cwd: routeProjectNested }))
+    (await getProviderSkill(projectPolicyBlocker, { sessionId: "sess-live", cwd: routeProjectNested }))
       .content,
     "Project route body",
     "project policy blocker resolves only inside its current workspace",
@@ -3083,8 +2835,8 @@ try {
   );
   eq(
     projectAgentEnableResponse.status,
-    200,
-    "project Agent skills support manager-local enable",
+    400,
+    "project Agent legacy enable is rejected",
   );
   eq(
     await readFile(
@@ -3100,8 +2852,10 @@ try {
     projectAgentSourceBeforeToggle,
     "project Agent enable also leaves the source file unchanged",
   );
+  eq((await setSessionSkillExclusions("sess-live", [], undefined, { projectCwds: [routeProjectNested] })).excludedSkills?.length, 0, "clearing explicit exclusions restores project defaults");
+  await selectMembers([member(httpProjectRoot.key, "route-project-skill")], { projectCwds: [routeProjectNested] }, "sess-live");
   projectPolicyCandidates = await listProviderCandidates({
-    cwd: routeProjectNested,
+    sessionId: "sess-live", cwd: routeProjectNested,
   });
   const projectEnableOverlay = projectPolicyCandidates.find(
     (item) =>
@@ -3149,8 +2903,8 @@ try {
   );
   eq(
     rejectedProjectToggle.payload.code,
-    "error.state.invalid",
-    "project Agent toggles refuse to overwrite an invalid manager state file",
+    "error.policy.sessionOnly",
+    "retired project Agent toggles reject without overwriting invalid state",
   );
   eq(
     await readFile(managerStatePath(), "utf8"),
@@ -3201,8 +2955,8 @@ try {
   );
   eq(
     projectDisableResponse.status,
-    200,
-    "disable route accepts an active project DSH root",
+    400,
+    "disable route rejects legacy project DSH policy",
   );
   eq(
     await readFile(
@@ -3235,8 +2989,8 @@ try {
   );
   eq(
     projectEnableResponse.status,
-    200,
-    "enable route restores an active project DSH skill",
+    400,
+    "enable route rejects legacy project DSH policy",
   );
   eq(
     await readFile(
@@ -3246,8 +3000,9 @@ try {
     projectDshSourceBeforeToggle,
     "project DSH enable also leaves the source Skill file unchanged",
   );
+  await selectMembers([member(httpProjectDshRoot.key, "route-project-created")], { projectCwds: [routeProjectNested] }, "sess-live");
   const projectDshEnableOverlay = (
-    await listProviderCandidates({ cwd: routeProjectNested })
+    await listProviderCandidates({ sessionId: "sess-live", cwd: routeProjectNested })
   ).find(
     (item) =>
       item.source === "project-dsh" && item.name === "route-project-created",
@@ -3427,8 +3182,8 @@ try {
   );
   eq(
     localhostHostResponse.status,
-    200,
-    "mutating route accepts localhost Host headers",
+    400,
+    "localhost passes host fence and reaches retired-policy rejection",
   );
 
   const uploadResponse = await requestJson(
@@ -3580,7 +3335,13 @@ try {
     headers: secureHeaders,
     body: JSON.stringify({ name: "http-skill" }),
   });
-  eq(disableResponse.status, 200, "valid mutation returns 200");
+  eq(disableResponse.status, 400, "valid legacy mutation receives migration rejection");
+  eq((await disableResponse.json()).code, "error.policy.sessionOnly", "HTTP disable explicitly rejects retired policy");
+  const httpSelection = await selectMembers([member("dsh", "http-skill")]);
+  const beforeSelectionInvalidation = invalidated;
+  const selectedResponse = await requestJson(api + "/session-loadout", "POST", secureHeaders, JSON.stringify({ sessionId: "sess-live", loadoutId: httpSelection.id }));
+  eq(selectedResponse.status, 200, "session selection route succeeds");
+  ok(invalidated > beforeSelectionInvalidation, "session selection invalidates providers");
   eq(
     await readFile(join(dshRoot, "http-skill", "SKILL.md"), "utf8"),
     httpSkillSourceBeforeToggle,
@@ -3615,13 +3376,13 @@ try {
   });
   eq(
     publicResponse.status,
-    200,
-    "HTTP route stores public Agent toggles locally",
+    400,
+    "HTTP route rejects public Agent legacy toggles",
   );
   const publicPayload = await publicResponse.json();
   ok(
-    publicPayload.ok === true && publicPayload.data.enabled === false,
-    "HTTP public toggle returns disabled manager state",
+    publicPayload.ok === false && publicPayload.code === "error.policy.sessionOnly",
+    "HTTP public toggle returns migration error",
   );
   const httpDeleteAgents = await fetch(api + "/delete", {
     method: "POST",
@@ -3703,7 +3464,7 @@ try {
 const snap = await state();
 eq(
   snap.roots.length,
-  22,
+  23,
   "state returns DSH, CC Switch, Copilot, Cursor, first-tier Agents, WorkBuddy, Qoder, and common Agent roots",
 );
 ok(
@@ -3745,7 +3506,7 @@ ok(
 );
 ok(
   invalidPolicySnap.loadable === true,
-  "manager policy can load a structurally valid Skill even when source invocation fields are invalid",
+  "inventory retains structural loadability separately from invalid invocation policy",
 );
 const agentsSnap = snap.roots.find((r) => r.key === "agents");
 ok(
@@ -3824,12 +3585,12 @@ const readonlyProjectDefinition = resolvedProjectRoots.find(
 ok(
   writableProjectDefinition.mutable === true &&
     writableProjectDefinition.toggleable === true,
-  "project DSH roots allow create/delete plus manager-local invocation toggles",
+  "project DSH roots expose writable inventory and legacy capability metadata",
 );
 ok(
   readonlyProjectDefinition.mutable === false &&
     readonlyProjectDefinition.toggleable === true,
-  "project Agent roots keep source files read-only while allowing local policy toggles",
+  "project Agent roots keep source files read-only and retain legacy metadata",
 );
 const directProjectCreated = await createSkill(
   {
@@ -3915,7 +3676,8 @@ eq(
   "error.root.readonly",
   "deleteSkill keeps project .agents/skills read-only",
 );
-const projectSnap = await state({
+await selectMembers([member(writableProjectDefinition.key, "project-priority"), member(readonlyProjectDefinition.key, "project-priority"), member(resolvedProjectRoots.find(root => root.kind === "project-agents" && root.projectRoot === secondProject).key, "project-priority")], { projectCwds: [routeProjectNested, secondProject] });
+const projectSnap = await selectedState({
   projectCwds: [routeProjectNested, secondProject],
 });
 const firstDshProject = projectSnap.roots.find(
@@ -3924,7 +3686,8 @@ const firstDshProject = projectSnap.roots.find(
 const firstAgentsProject = projectSnap.roots.find(
   (root) => root.kind === "project-agents" && root.projectRoot === routeProject,
 );
-const secondAgentsProject = projectSnap.roots.find(
+const secondProjectSnap = await selectedState({ projectCwds: [secondProject] });
+const secondAgentsProject = secondProjectSnap.roots.find(
   (root) =>
     root.kind === "project-agents" && root.projectRoot === secondProject,
 );
@@ -3933,7 +3696,7 @@ ok(
     firstDshProject.scope === "project" &&
     firstDshProject.mutable === true &&
     firstDshProject.toggleable === true,
-  "project DSH roots expose create/delete plus non-mutating invocation-policy toggles",
+  "project DSH inventory exposes create/delete and legacy capability metadata",
 );
 eq(
   firstDshProject.rank,
@@ -4048,10 +3811,9 @@ if (await tryLink(ccswitchSkill, linkedCcSwitchProjectSkill, projectLinkType)) {
     projectCwds: [routeProjectNested],
   });
   ok(
-    linkedCcSwitchProjectSnap.roots
-      .find((root) => root.key === firstAgentsProject.key)
-      .skills.some((skill) => skill.name === "linked-ccswitch-project"),
-    "项目 Agent 跟随 CC Switch 目录链接",
+    linkedCcSwitchProjectSnap.roots.flatMap(root => root.skills).filter(skill => skill.canonicalName === "ccswitch-shared").length === 1 &&
+      linkedCcSwitchProjectSnap.roots.find(root => root.key === "ccswitch").skills.some(skill => skill.name === "ccswitch-shared"),
+    "project distribution link deduplicates to its canonical CC Switch inventory owner",
   );
   await rm(linkedCcSwitchProjectSkill, { recursive: true, force: true });
 } else {
@@ -4132,8 +3894,8 @@ if (
   eq(
     (await setSkillEnabled(unsafeDefinition, "outside-project-write", false))
       .code,
-    "error.root.unsafe",
-    "project toggle refuses a linked .dsh/skills root",
+    "error.policy.sessionOnly",
+    "retired project toggle rejects before following linked root",
   );
   eq(
     (await deleteSkill(unsafeDefinition, "outside-project-write")).code,
@@ -4191,10 +3953,10 @@ try {
     "重叠项目来源不能绕过用户技能停用",
   );
   eq(
-    (await setSkillEnabled(overlapAgentDefinition, "overlap-shared", true))
+    (await createLoadout("Unsafe overlap", null, [member(overlapAgentDefinition.key, "overlap-shared")], undefined, { projectCwds: [overlapProject] }))
       .code,
-    "error.root.unsafe",
-    "拒绝使用旧项目来源绕过重叠检查",
+    "error.loadout.globalOnly",
+    "拒绝项目成员，无论旧来源是否因重叠而失效",
   );
   eq(
     (await state({ projectCwds: [overlapProject] })).roots.filter(
@@ -4319,8 +4081,8 @@ const nativeAgentsCandidate = {
   rank: 450,
 };
 try {
-  await setSourceEnabled("codex", false);
-  const codexOnlyCandidates = (await listProviderCandidates()).filter(
+  await selectMembers([member("dsh", "issue-nine-local")]);
+  const codexOnlyCandidates = (await selectedCandidates()).filter(
     (candidate) => candidate.name === duplicateName,
   );
   const mergedCodexOnly = await mergedSkillCandidate(
@@ -4332,28 +4094,28 @@ try {
   eq(
     mergedCodexOnly?.source,
     "user-dsh",
-    "议题最小场景：单个禁用 Codex 副本不能遮蔽默认启用的 DSH",
+    "议题最小场景：未选 Codex 副本不能遮蔽会话选中的 DSH",
   );
   ok(
     mergedCodexOnly?.invocation.modelInvocable &&
       mergedCodexOnly?.invocation.userInvocable,
-    "议题最小场景：默认启用的 DSH 保持双通道可调用",
+    "议题最小场景：会话选中的 DSH 保持双通道可调用",
   );
   await makeSkill(
     agentsRoot,
     "issue-nine-agents",
     duplicateDoc("公共 Agent 正文"),
   );
-  await setSourceEnabled("agents", false);
-  const duplicateState = await state();
+  await selectMembers([member("dsh", "issue-nine-local"), member("agents", "issue-nine-agents"), member("codex", "issue-nine-codex")]);
+  const duplicateState = await selectedState();
   const localWinner = duplicateState.roots
     .find((root) => root.key === "dsh")
     .skills.find((skill) => skill.declaredName === duplicateName);
   ok(
     localWinner.winner && localWinner.enabled,
-    "禁用外部同名来源时管理页仍以 DSH 为启用赢家",
+    "全部副本被选时管理页以 DSH 为优先赢家",
   );
-  const duplicateCandidates = (await listProviderCandidates()).filter(
+  const duplicateCandidates = (await selectedCandidates()).filter(
     (candidate) => candidate.name === duplicateName,
   );
   eq(
@@ -4364,7 +4126,7 @@ try {
   eq(
     duplicateCandidates[0]?.source,
     "user-dsh",
-    "没有显式启用记录的 DSH 冲突赢家也提供作用域候选",
+    "显式所选 DSH 冲突赢家提供会话候选",
   );
   const mergedDuplicate = await mergedSkillCandidate(
     duplicateName,
@@ -4375,7 +4137,7 @@ try {
   eq(
     mergedDuplicate?.source,
     "user-dsh",
-    "禁用外部副本及预设原生副本均不能遮蔽全局 DSH 赢家",
+    "低优先级所选副本及预设候选不能遮蔽 DSH 赢家",
   );
   ok(
     mergedDuplicate?.invocation.modelInvocable &&
@@ -4383,21 +4145,21 @@ try {
     "DSH 冲突赢家同时进入模型目录和斜杠菜单",
   );
   eq(
-    (await getProviderSkill(mergedDuplicate))?.content,
+    (await getProviderSkill(mergedDuplicate, { sessionId: policySession }))?.content,
     "DSH 正文",
     "运行时加载的是 DSH 赢家正文",
   );
-  await setSourceEnabled("agents", true);
-  await setSourceEnabled("codex", true);
+  eq((await setSourceEnabled("agents", true)).code, "error.policy.sessionOnly", "legacy source enable cannot alter priority");
+  eq((await setSourceEnabled("codex", true)).code, "error.policy.sessionOnly", "legacy source enable cannot alter membership");
   eq(
-    (await listProviderCandidates()).filter(
+    (await selectedCandidates()).filter(
       (candidate) => candidate.name === duplicateName,
     )[0]?.source,
     "user-dsh",
-    "启用低优先级来源也不能替换 DSH 赢家",
+    "被拒绝的来源启用不能替换所选 DSH 赢家",
   );
-  await setSkillEnabled(dshRoot, "issue-nine-local", false);
-  const disabledCandidates = (await listProviderCandidates()).filter(
+  await selectMembers([member("agents", "issue-nine-agents"), member("codex", "issue-nine-codex")]);
+  const disabledCandidates = (await selectedCandidates()).filter(
     (candidate) => candidate.name === duplicateName,
   );
   const mergedDisabled = await mergedSkillCandidate(
@@ -4409,12 +4171,12 @@ try {
   eq(
     mergedDisabled?.source,
     "agent-agents",
-    "停用 DSH 副本后选择仍启用的公共 Agent 副本",
+    "移除 DSH 成员后选择组内公共 Agent 副本",
   );
   ok(
     mergedDisabled?.invocation.modelInvocable === true &&
       mergedDisabled?.invocation.userInvocable === true,
-    "停用只影响对应副本，其他来源继续可调用",
+    "仅选中的其他来源继续可调用",
   );
 
   const duplicateProject = join(tmp, "issue-nine-project");
@@ -4436,9 +4198,9 @@ try {
   const duplicateProjectAgents = duplicateProjectRoots.find(
     (root) => root.kind === "project-agents",
   );
-  await setSkillEnabled(duplicateProjectAgents, "project-agent-copy", false);
+  await selectMembers([member(duplicateProjectDsh.key, "project-copy"), member("agents", "issue-nine-agents")], { projectCwds: [duplicateProject] });
   const projectCandidates = (
-    await listProviderCandidates({ cwd: duplicateProject })
+    await selectedCandidates({ sessionId: policySession, cwd: duplicateProject })
   ).filter((candidate) => candidate.name === duplicateName);
   eq(
     projectCandidates.length,
@@ -4454,20 +4216,20 @@ try {
   eq(
     mergedProject?.source,
     "project-dsh",
-    "禁用的用户 DSH 和项目 Agent 不能遮蔽启用的项目 DSH",
+    "未选的用户 DSH 和项目 Agent 不能遮蔽所选项目 DSH",
   );
   ok(
     mergedProject?.invocation.modelInvocable &&
       mergedProject?.invocation.userInvocable,
-    "项目原生赢家无显式覆盖也保持可调用",
+    "显式选中的项目原生赢家保持可调用",
   );
   eq(
-    (await getProviderSkill(mergedProject, { cwd: duplicateProject }))?.content,
+    (await getProviderSkill(mergedProject, { sessionId: policySession, cwd: duplicateProject }))?.content,
     "项目 DSH 正文",
     "项目冲突加载正确工作区正文",
   );
   const projectWinnerState = (
-    await state({ projectCwds: [duplicateProject] })
+    await selectedState({ projectCwds: [duplicateProject] })
   ).roots
     .find((root) => root.key === duplicateProjectDsh.key)
     .skills.find((skill) => skill.declaredName === duplicateName);
@@ -4476,7 +4238,7 @@ try {
     "项目管理页与运行时赢家保持一致",
   );
   const outsideCandidates = (
-    await listProviderCandidates({ cwd: noGitWorkspace })
+    await selectedCandidates({ cwd: noGitWorkspace })
   ).filter((candidate) => candidate.name === duplicateName);
   eq(outsideCandidates[0]?.source, "agent-agents", "其他工作区不继承项目同名赢家");
   await makeSkill(
@@ -4484,8 +4246,10 @@ try {
     "independent-copy",
     duplicateDoc("另一项目正文"),
   );
+  const independentRoot = (await projectRoots([secondProject])).find(root => root.kind === "project-agents");
+  await selectMembers([member(independentRoot.key, "independent-copy"), member("agents", "issue-nine-agents")], { projectCwds: [secondProject] });
   const independentCandidates = (
-    await listProviderCandidates({ cwd: secondProject })
+    await selectedCandidates({ sessionId: policySession, cwd: secondProject })
   ).filter((candidate) => candidate.name === duplicateName);
   eq(
     independentCandidates[0]?.source,
@@ -4493,25 +4257,29 @@ try {
     "不同项目独立选择自己的项目 Agent 赢家",
   );
   eq(
-    (await getProviderSkill(independentCandidates[0], { cwd: secondProject }))
+    (await getProviderSkill(independentCandidates[0], { sessionId: policySession, cwd: secondProject }))
       ?.content,
     "另一项目正文",
     "不同项目不会加载前一工作区的同名正文",
   );
-  await setSkillEnabled(duplicateProjectDsh, "project-copy", false);
+  await selectMembers([member("agents", "issue-nine-agents")], { projectCwds: [duplicateProject] });
+  const defaultProjectCandidate = (await selectedCandidates({ cwd: duplicateProject })).find(candidate => candidate.name === duplicateName);
+  eq(defaultProjectCandidate?.source, "project-dsh", "project default outranks selected global copy without explicit exclusion");
+  const projectExclusions = [member(duplicateProjectDsh.key, "project-copy"), member(duplicateProjectAgents.key, "project-agent-copy")];
+  eq((await setSessionSkillExclusions(policySession, projectExclusions, undefined, { projectCwds: [duplicateProject] })).excludedSkills?.length, 2, "explicitly exclude both default project copies");
   const disabledProjectCandidates = (
-    await listProviderCandidates({ cwd: duplicateProject })
+    await selectedCandidates({ sessionId: policySession, cwd: duplicateProject })
   ).filter((candidate) => candidate.name === duplicateName);
   eq(
     disabledProjectCandidates.length,
     1,
-    "停用项目副本后仍只输出一个实际赢家",
+    "排除项目副本后仍只输出一个实际赢家",
   );
   ok(
     disabledProjectCandidates[0]?.source === "agent-agents" &&
       disabledProjectCandidates[0]?.invocation.modelInvocable === true &&
       disabledProjectCandidates[0]?.invocation.userInvocable === true,
-    "项目副本全部停用后回退到启用的全局副本",
+    "项目显式排除后回退到所选全局副本",
   );
   const mergedFallback = await mergedSkillCandidate(
     duplicateName,
@@ -4519,25 +4287,23 @@ try {
     [{ ...nativeDshCandidate, source: "project-dsh", rank: 100 }],
     disabledProjectCandidates,
   );
-  eq(mergedFallback?.source, "agent-agents", "宿主原生项目候选不能抢回已停用项目副本");
-  eq((await getProviderSkill(mergedFallback, { cwd: duplicateProject }))?.content, "公共 Agent 正文", "回退加载全局正文");
-  await setSourceEnabled("agents", false);
-  await setSourceEnabled("codex", false);
-  const allDisabled = (await listProviderCandidates({ cwd: duplicateProject })).filter((c) => c.name === duplicateName);
+  eq(mergedFallback?.source, "agent-agents", "宿主原生项目候选不能抢回已排除项目副本");
+  eq((await getProviderSkill(mergedFallback, { sessionId: policySession, cwd: duplicateProject }))?.content, "公共 Agent 正文", "回退加载全局正文");
+  await setSessionLoadout(policySession, null);
+  const allDisabled = (await selectedCandidates({ sessionId: policySession, cwd: duplicateProject })).filter((c) => c.name === duplicateName);
   const mergedAllDisabled = await mergedSkillCandidate(duplicateName, [nativeDshCandidate], [{ ...nativeDshCandidate, source: "project-dsh", rank: 100 }], allDisabled);
-  ok(mergedAllDisabled?.invocation.modelInvocable === false && mergedAllDisabled?.invocation.userInvocable === false, "全部副本停用后阻断原生扫描恢复调用");
-  await setSourceEnabled("agents", true);
-  await setSourceEnabled("codex", true);
+  ok(mergedAllDisabled?.invocation.modelInvocable === false && mergedAllDisabled?.invocation.userInvocable === false, "清除编组后项目排除仍阻断原生扫描恢复调用");
+  eq((await sessionLoadoutView(policySession)).effective.skills.length, 0, "cleared selection has no implicit fallback");
   await makeSkill(
     dshRoot,
     "issue-nine-unique",
     "---\nname: issue-nine-unique\ndescription: 无冲突技能。\n---\n原生正文",
   );
   ok(
-    !(await listProviderCandidates()).some(
-      (candidate) => candidate.name === "issue-nine-unique",
+    (await selectedCandidates()).some(
+      (candidate) => candidate.name === "issue-nine-unique" && !candidate.invocation.modelInvocable && !candidate.invocation.userInvocable,
     ),
-    "无冲突且无策略覆盖的 DSH 技能仍由原生 provider 加载",
+    "unselected unique DSH inventory blocks native implicit loading",
   );
   await makeSkill(
     duplicateProjectDsh.path,
@@ -4545,11 +4311,14 @@ try {
     "---\nname: issue-nine-unique-project\ndescription: 无冲突项目技能。\n---\n原生项目正文",
   );
   ok(
-    !(await listProviderCandidates({ cwd: duplicateProject })).some(
-      (candidate) => candidate.name === "issue-nine-unique-project",
+    (await selectedCandidates({ sessionId: policySession, cwd: duplicateProject })).some(
+      (candidate) => candidate.name === "issue-nine-unique-project" && candidate.invocation.modelInvocable && candidate.invocation.userInvocable,
     ),
-    "无冲突且无策略覆盖的项目技能仍由原生 provider 加载",
+    "new unexcluded project skill is default-available even with no selected groups",
   );
+  eq((await setSessionSkillExclusions(policySession, [...projectExclusions, member(duplicateProjectDsh.key, "issue-nine-unique-project")], undefined, { projectCwds: [duplicateProject] })).excludedSkills?.length, 3, "exclude the new project default explicitly");
+  const excludedUnique = (await selectedCandidates({ cwd: duplicateProject })).find(candidate => candidate.name === "issue-nine-unique-project");
+  ok(excludedUnique && !excludedUnique.invocation.modelInvocable && !excludedUnique.invocation.userInvocable, "explicit unique-project exclusion blocks both native invocation channels");
   await makeSkill(
     agentsRoot,
     "issue-nine-external",
@@ -4560,8 +4329,8 @@ try {
     "issue-nine-external",
     "---\nname: issue-nine-external\ndescription: 外部副本。\n---\nCodex 正文",
   );
-  await setSourceEnabled("agents", false);
-  const externalCandidates = (await listProviderCandidates()).filter(
+  await selectMembers([member("codex", "issue-nine-external")]);
+  const externalCandidates = (await selectedCandidates()).filter(
     (candidate) => candidate.name === "issue-nine-external",
   );
   eq(externalCandidates.length, 1, "没有 DSH 副本时同样只保留外部同名赢家");
@@ -4569,7 +4338,7 @@ try {
     externalCandidates[0]?.source === "agent-codex" &&
       externalCandidates[0]?.invocation.modelInvocable === true &&
       externalCandidates[0]?.invocation.userInvocable === true,
-    "停用公共来源后启用的 Codex 副本可继续调用",
+    "仅选择 Codex 副本时可调用该副本",
   );
   await makeSkill(
     dshRoot,
@@ -4581,8 +4350,9 @@ try {
     "issue-nine-invalid",
     "---\nname: issue-nine-invalid\ndescription: 有效副本。\n---\n有效正文",
   );
+  await selectMembers([member("dsh", "issue-nine-invalid"), member("codex", "issue-nine-invalid")]);
   eq(
-    (await listProviderCandidates()).find(
+    (await selectedCandidates()).find(
       (candidate) => candidate.name === "issue-nine-invalid",
     )?.source,
     "agent-codex",

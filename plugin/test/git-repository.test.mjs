@@ -59,7 +59,7 @@ try {
   // 2. 本地真实 Git 仓库获取与大小限制测试
   const remoteDir = join(sandbox, "remote-repo");
   await mkdir(join(remoteDir, "skills/test-skill"), { recursive: true });
-  execFileSync("git", ["init"], { cwd: remoteDir, stdio: "ignore" });
+  execFileSync("git", ["init", "--initial-branch=master"], { cwd: remoteDir, stdio: "ignore" });
   execFileSync("git", ["config", "user.name", "Test User"], { cwd: remoteDir, stdio: "ignore" });
   execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: remoteDir, stdio: "ignore" });
 

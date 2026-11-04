@@ -242,15 +242,15 @@ try {
   // ── 启停与分类：自定义来源沿用来源级与分类级开关 ──
   const toggleTarget = batch.added[0].id;
   const disabled = await setSourceEnabled(toggleTarget, false);
-  ok(!(disabled && disabled.ok === false), "自定义来源可以停用");
-  eq((await state()).roots.find((root) => root.key === toggleTarget).enabled, false, "停用后 state 显示 disabled");
+  eq(disabled.code, "error.policy.sessionOnly", "旧来源开关拒绝写策略");
+  eq((await state()).roots.find((root) => root.key === toggleTarget).enabled, true, "库存来源不受旧开关影响");
   await setSourceEnabled(toggleTarget, true);
   eq((await state()).roots.find((root) => root.key === toggleTarget).enabled, true, "重新启用生效");
 
   const category = await createCategory(toggleTarget, "常用");
   ok(!(category && category.ok === false), "自定义来源可以建分类");
   const categoryOff = await setCategoryEnabled(toggleTarget, category.category.id, false);
-  ok(!(categoryOff && categoryOff.ok === false), "自定义来源的分类可以单独停用");
+  eq(categoryOff.code, "error.policy.sessionOnly", "分类不能设置加载策略");
 
   // ── 目录消失：来源保留并给出 warning ──
   const vanishing = join(tmp, "vanishing");

@@ -20,10 +20,14 @@ export type SessionLoadoutView = {
     sessionId: string | null;
     scope: string;
     loadoutId: string | null;
+    loadoutIds: string[];
+    excludedSkills: {root: string; name: string}[];
     gatekeeper?: boolean;
     effective: {
-        source: 'session' | 'scope' | 'none';
+        source: 'session' | 'none';
+        members: { root: string; name: string; displayName: string; status: 'available' | 'missing' | 'invalid' | 'shadowed' | 'excluded'; reason?: string; loadoutIds: string[]; projectDefault: boolean; excludedBy?: {root: string; name: string}[] }[];
         loadout: Loadout | null;
+        loadouts: Loadout[];
         skills: string[];
     };
 };
@@ -59,7 +63,9 @@ export type ApiRoutes = RepositoryRoutes & Record<SkillsShSearchPath, SkillsShSe
     '/category-enable': unknown;
     '/category-disable': unknown;
     '/skill-note': unknown;
-    '/loadouts': { scope: string; loadouts: Loadout[]; active: string | null; gatekeeper?: boolean };
+    '/loadouts': { scope: string; loadouts: Loadout[]; active: string | null; activeIds: string[]; gatekeeper?: boolean; migration?: { manualReferences: {root: string; name: string}[]; hasLegacyPolicy: boolean } };
+    '/loadout-update': { loadout: Loadout };
+    '/loadout-import-legacy': { loadout: Loadout };
     '/loadout-create': { loadout: Loadout };
     '/loadout-rename': unknown;
     '/loadout-note': unknown;
@@ -68,7 +74,9 @@ export type ApiRoutes = RepositoryRoutes & Record<SkillsShSearchPath, SkillsShSe
     '/loadout-remove': unknown;
     '/loadout-toggle': { id: string; enabled: boolean; changed: number; skipped: string[] };
     '/loadout-apply': { id: string; scope: string; exclusive: boolean; applied: number; skipped: string[]; disabledOthers: number };
+    '/default-loadouts': { loadoutIds: string[] };
     '/session-loadout': SessionLoadoutView;
+    '/session-skill-exclusions': { sessionId: string; excludedSkills: {root: string; name: string}[] };
     '/skill-reference': unknown;
     '/sidebar-entry': { enabled: boolean };
     '/online-update': { enabled: boolean };
@@ -109,6 +117,8 @@ export interface SessionSnapshot {
 }
 export interface SectionProps {
     t: Translate;
+    entry?: { mode: 'groups' | 'library' | 'create' | 'edit'; loadout?: Loadout };
+    onClose?: () => void;
     useSessions?: (selector: (snapshot?: SessionSnapshot) => string | undefined) => string | undefined;
 }
 export interface Filters {

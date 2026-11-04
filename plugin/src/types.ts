@@ -87,7 +87,16 @@ export interface LoadoutMember {
     root: string;
     name: string;
 }
-/** loadout：命名的、跨来源的一组技能引用，面向任务整组启停/应用。 */
+/** Actual resolution of one stored member in the selected session inventory. */
+export interface EffectiveLoadoutMember extends LoadoutMember {
+    displayName: string;
+    loadoutIds: string[];
+    projectDefault: boolean;
+    excludedBy?: LoadoutMember[];
+    status: "available" | "missing" | "invalid" | "shadowed" | "excluded";
+    reason?: string;
+}
+/** 共享命名成员集合；会话显式选择多个组，不修改源技能。 */
 export interface Loadout {
     id: string;
     name: string;
@@ -112,14 +121,18 @@ export interface ManagerState {
     customNotes?: Record<string, Record<string, string>>;
     /** 跨来源的技能编组（loadout）。旧状态文件可缺省；坏数据整段丢弃并记 warning。 */
     loadouts?: Loadout[];
-    /** 每个作用域当前应用的 loadout：键为 "user" 或 "project:<identity,...>"，值为 loadout id。 */
+    /** 旧作用域默认：仅保留作迁移数据，不参与加载。 */
     activeLoadout?: Record<string, string>;
     /**
-     * 会话级编组覆盖：键为 sessionId，值为 loadout id。
-     * 值为 "" 表示该会话显式「不加载」；没有该键表示回落到 scope 的 activeLoadout。
+     * 会话级编组集合：新写入 string[]，兼容旧单数字符串。
+     * 空数组、旧空串或没有该键均不加载。
      */
-    sessionLoadouts?: Record<string, string>;
-    /** 守门人模式：开启后只有当前编组成员与被手动引用的技能加载。默认 true。 */
+    sessionLoadouts?: Record<string, string | string[]>;
+    /** Initial group snapshot for genuinely new sessions only; never a read-time fallback. */
+    defaultLoadoutIds?: string[];
+    /** Per-session exclusions win project defaults and selected group membership. */
+    sessionExcludedSkills?: Record<string, LoadoutMember[]>;
+    /** 旧策略字段：只读保留，不参与会话加载。 */
     gatekeeper?: boolean;
 }
 export interface PolicyResult {
@@ -128,12 +141,13 @@ export interface PolicyResult {
     warning: Diagnostic | null;
 }
 export interface Policy {
+    excluded?: boolean;
     override?: boolean;
     sourceEnabled: boolean;
     modelInvocable: boolean;
     userInvocable: boolean;
     enabled: boolean;
-    /** 守门人拦截：开启且既非当前编组成员也未被手动引用时为 true（与手动排除区分开）。 */
+    /** 非本会话所选编组成员；未选编组时所有库存技能均为 true。 */
     gated?: boolean;
 }
 export interface SkillView extends Omit<SkillEntry, 'docPath' | 'entryPath' | 'realDocPath' | 'realEntryPath' | 'linked'> {
@@ -160,7 +174,7 @@ export interface SkillView extends Omit<SkillEntry, 'docPath' | 'entryPath' | 'r
     customNote?: string | null;
     /** 可写根里的顶层目录链接。详情和启停可用，删除与覆盖不可用。 */
     linked?: boolean;
-    /** 守门人开启且该技能既非当前编组成员也未被手动引用：UI 显示"未加载"而非"停用"。 */
+    /** 非当前会话编组成员：库存仍展示，但本插件不加载。 */
     gated?: boolean;
 }
 export interface RootView extends SkillRoot {
@@ -298,7 +312,7 @@ export interface ScopeOptions {
     projectCwds?: string[];
     cwd?: string;
     signal?: AbortSignal;
-    /** 会话级编组覆盖的会话 id；缺省表示只看 scope（user / project:<identity,...>）。 */
+    /** 会话级编组覆盖的会话 id；缺省表示没有会话选择，不加载。 */
     sessionId?: string;
 }
 export interface RenameOptions {

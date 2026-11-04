@@ -13,7 +13,7 @@ for (const agent of ['CODEX', 'CLAUDE', 'GEMINI', 'OPENCODE', 'CURSOR', 'COPILOT
   process.env[`DSH_${agent}_HOME`] = join(sandbox, `configured-${agent.toLowerCase()}`);
 const { createRepositoryManager } = await import("../lib/repositories.js");
 const { installationSourceKey } = await import("../lib/repository-updates.js");
-const { userRoots, repositoryDestinations, state, listTrash, permanentlyDeleteTrash, deleteSkill, importUploadedSkill } = await import("../lib/core.js");
+const { userRoots, repositoryDestinations, state, listTrash, permanentlyDeleteTrash, deleteSkill, importUploadedSkill, readManagerState } = await import("../lib/core.js");
 const doc = name => strToU8(`---\nname: ${name}\ndescription: Test install destinations\n---\nTest instructions\n`);
 let archive;
 const snapshot = text => zipSync({
@@ -58,8 +58,8 @@ try {
   assert.equal((await skill("shared-demo")).status, "installed");
   assert.equal((await skill("shared-demo")).canUninstall, true);
   assert.equal((await manager.sources())[installationSourceKey(root("agents").path, "shared-demo")].root, "agents");
-  const policy = JSON.parse(await fs.readFile(join(process.env.DSH_HOME, "skills-manager/state.json"), "utf8"));
-  assert.ok(policy.enabledSkills.agents.includes("shared-demo"));
+  const policy = (await readManagerState()).state;
+  assert.ok(!policy.enabledSkills.agents.includes("shared-demo"), "install preserves inventory without auto-loading");
   assert.equal((await state()).roots.find(item => item.key === "agents").mutable, true, "公共 Agent 统一开放文件管理");
   const genericImport = await importUploadedSkill({ name: "generic-demo", entries: [{ path: "SKILL.md", data: Buffer.from(doc("generic-demo")).toString("base64") }] }, undefined, { root: root("agents") });
   assert.notEqual(genericImport.ok, false, "普通导入无需安装入口特权");
@@ -247,9 +247,9 @@ try {
   ]);
   assert.equal(concurrent.filter(item => item.status === "fulfilled").length, 1, "no cross-root duplicate installations");
 
-  // Fail enable-state persistence: copied Shared Agent folder must be removed.
+  // Fail inventory intent persistence: copied Shared Agent folder must not be published.
   const originalRename = fs.rename;
-  fs.rename = async (from, to) => { if (to.endsWith("state.json")) throw new Error("enable write failed"); return originalRename(from, to); };
+  fs.rename = async (from, to) => { if (to.endsWith("repositories.json")) throw new Error("inventory intent write failed"); return originalRename(from, to); };
   try { await assert.rejects(manager.install({ id: repo.id, path: "blocked", root: "agents" })); }
   finally { fs.rename = originalRename; }
   assert.equal(await exists(join(root("agents").path, "blocked-demo")), false);

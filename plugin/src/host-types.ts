@@ -88,7 +88,9 @@ export interface HostContext {
     on?: {
         (event: 'agent/created' | 'agent/disposed', handler: (event: {
             agent: Agent;
-        }) => void): (() => void) | void;
+            /** Public creation source: only startup represents a new session. */
+            source?: 'startup' | 'resume' | 'clear' | 'compact';
+        }) => void | Promise<void>): (() => void) | void;
         (event: 'tools/pre-execute', handler: (execution: {
             name: string;
         }, next: () => unknown) => unknown): (() => void) | void;

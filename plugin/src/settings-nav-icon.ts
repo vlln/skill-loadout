@@ -30,7 +30,7 @@ const NAV_ICON_CSS = [
   `  flex: none;`,
   `  width: 16px;`,
   `  height: 16px;`,
-  `  background-color: currentColor;`,
+  `  background-color: var(--dsw-alias-label-secondary);`,
   `  -webkit-mask: ${SKILL_ICON_MASK} center / contain no-repeat;`,
   `  mask: ${SKILL_ICON_MASK} center / contain no-repeat;`,
   `  -webkit-mask-repeat: no-repeat;`,

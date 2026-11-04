@@ -18,8 +18,14 @@ process.env.DSH_HOME = join(temp, "dsh");
 process.env.DSH_AGENTS_HOME = join(temp, "agents");
 process.env.DSH_CODEX_HOME = join(temp, "codex");
 const core = await import("../lib/core.js");
-// 本测试断言 v1 策略语义（默认启用、显式启停覆盖），显式关闭守门人（装了插件默认开）。
-await core.setGatekeeper(false);
+const sessionId = "readonly-session";
+const candidates = (options = {}) => core.listProviderCandidates({ ...options, sessionId });
+const select = async (members, options = {}) => {
+  const result = await core.createLoadout(`Fixture ${++select.counter}`, null, members.filter(member => !member.root.startsWith('project-')), undefined, options);
+  assert.ok(result.loadout, JSON.stringify(result));
+  await core.setSessionLoadout(sessionId, result.loadout.id);
+};
+select.counter = 0;
 const linkType = process.platform === "win32" ? "junction" : "dir";
 async function skill(path, name) {
   await mkdir(path, { recursive: true });
@@ -54,7 +60,7 @@ try {
     (await core.skillDetail("agents", "alias")).body,
     "external-review 正文",
   );
-  const candidate = (await core.listProviderCandidates()).find(
+  const candidate = (await candidates()).find(
     (e) => e.name === "external-review",
   );
   assert.equal(
@@ -75,7 +81,7 @@ try {
     "递归路径策略可往返保存",
   );
   assert.equal(
-    (await core.listProviderCandidates()).find(
+    (await candidates()).find(
       (e) => e.name === "external-review",
     ).invocation.modelInvocable,
     false,
@@ -86,9 +92,9 @@ try {
     "error.skill.notFound",
     "详情隐藏已去重入口",
   );
-  await core.setSkillEnabled(agents.path, "alias", true);
+  await select([{ root: "agents", name: "alias" }]);
   assert.equal(
-    (await core.listProviderCandidates()).find(
+    (await candidates()).find(
       (e) => e.name === "external-review",
     ).invocation.modelInvocable,
     true,
@@ -136,7 +142,7 @@ try {
   );
   await core.setSkillEnabled(agents.path, "nested/review", false);
   assert.equal(
-    (await core.listProviderCandidates()).find(
+    (await candidates()).find(
       (e) => e.name === "nested-review",
     ).invocation.userInvocable,
     false,
@@ -186,7 +192,7 @@ try {
   await core.setSkillEnabled(gemini.path, ".", false);
   assert.equal((await core.readManagerState()).writable, true);
   assert.equal(
-    (await core.listProviderCandidates()).find((e) => e.name === "root-skill")
+    (await candidates()).find((e) => e.name === "root-skill")
       .invocation.userInvocable,
     false,
   );
@@ -203,7 +209,7 @@ try {
   );
   await core.setSkillEnabled(antigravity.path, ".", false);
   assert.equal(
-    (await core.listProviderCandidates()).find((e) => e.name === "ag-skill")
+    (await candidates()).find((e) => e.name === "ag-skill")
       .invocation.userInvocable,
     false,
     "Google Antigravity 全局技能支持软停用",
@@ -225,25 +231,26 @@ try {
     ).body,
     "external-review 正文",
   );
+  await select([{ root: projectRoot.key, name: "review" }], { projectCwds: [project] });
   const projectCandidate = (
-    await core.listProviderCandidates({ cwd: project })
+    await candidates({ cwd: project })
   ).find((e) => e.name === "external-review");
   assert.equal(projectCandidate.source, "project-agents");
   assert.equal(
     (await core.getProviderSkill(projectCandidate, { cwd: project })).content,
     "external-review 正文",
   );
-  await core.setSkillEnabled(projectRoot, "review", false);
-  const fallback = (await core.listProviderCandidates({ cwd: project })).find((e) => e.name === "external-review");
+  await select([{ root: "agents", name: "alias" }]);
+  const fallback = (await candidates({ cwd: project })).find((e) => e.name === "external-review");
   assert.equal(fallback.invocation.userInvocable, true, "停用项目链接入口不影响全局入口");
-  assert.notEqual(fallback.source, "project-agents");
+  assert.ok(fallback, "alias selection keeps the shared real skill available");
   assert.equal(
     (await core.deleteSkill(projectRoot, "review")).code,
     "error.root.readonly",
   );
   await skill(join(projectRoot.path, "group", "project-only"), "project-only");
   const soleProject = (
-    await core.listProviderCandidates({ cwd: project })
+    await candidates({ cwd: project })
   ).find((e) => e.name === "project-only");
   assert.ok(soleProject, "没有同名冲突或显式策略时也提供项目只读候选");
   assert.equal(
@@ -274,12 +281,12 @@ try {
     "根 junction 指向用户来源时隐藏项目来源",
   );
   assert.equal(
-    (await core.setSkillEnabled(staleRoot, "nested/review", true)).code,
-    "error.root.unsafe",
-    "链接重叠后旧项目 key 也不可修改策略",
+    (await core.createLoadout("Unsafe source", null, [{ root: staleRoot.key, name: "nested/review" }], undefined, { projectCwds: [overlapProject] })).code,
+    "error.loadout.globalOnly",
+    "旧项目 key 不能通过链接重叠加入全局编组",
   );
   const overlapCandidate = (
-    await core.listProviderCandidates({ cwd: overlapProject })
+    await candidates({ cwd: overlapProject })
   ).find((e) => e.name === "nested-review");
   assert.equal(
     overlapCandidate.invocation.modelInvocable,
@@ -301,7 +308,7 @@ try {
     "可写 DSH 拒绝删除目录链接",
   );
   assert.equal(await readFile(join(external, "SKILL.md"), "utf8"), linkedDoc);
-  assert.equal((await core.setSkillEnabled(dsh.path, "external", false)).enabled, false);
+  assert.equal((await core.setSkillEnabled(dsh.path, "external", false)).code, "error.policy.sessionOnly");
   await rm(join(agents.path, "alias"));
   const replacement = await skill(join(temp, "replacement"), "external-review");
   await link(replacement, join(agents.path, "alias"));

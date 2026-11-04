@@ -71,7 +71,7 @@ try {
   let tree;
   function render() {
     state = outerState; cursor = 0;
-    const view = component({ t, useSessions: (selector) => selector({ current: undefined }) });
+    const view = component({ t, entry: { mode: "library" }, useSessions: (selector) => selector({ current: undefined }) });
     if (mountedKey !== view.props.key) { mountedKey = view.props.key; innerState = []; }
     state = innerState; cursor = 0; tree = view.type(view.props);
   }
@@ -95,11 +95,17 @@ try {
   const find = (predicate) => nodes().find(predicate);
   const rows = () => nodes().filter((node) => node.props.className === "dssm-name").map((node) => node.children[0]);
   const settle = async () => { render(); effects.splice(0).forEach((effect) => effect()); await tick(); await tick(); render(); };
-  const tab = async (name) => {
-    const tabs = find((node) => node.props?.className === "dssm-scope-tabs" && Array.isArray(node.props.items));
-    tabs.props.onChange(tabs.props.items.find((item) => item.label === name || (Array.isArray(item.label) && item.label.includes(name))).value);
-    await settle();
+  const selectNavigation = (name) => {
+    if (name === t('scope.user') || name === t('scope.project')) {
+      const local=nodes().find(n=>n.props.onClick&&n.children.includes(t('library.local')));local?.props.onClick();render();return;
+    }
+    const action=nodes().find(n=>n.props.onClick&&(n.children.includes(name)||n.props['aria-label']===name));
+    if(action){action.props.onClick();render();return;}
+    const local=nodes().find(n=>n.props.onClick&&n.children.includes(t('library.local')));local.props.onClick();render();
+    nodes().find(n=>n.props.onClick&&(n.children.includes(name)||n.props['aria-label']===name)).props.onClick();render();
   };
+
+  const tab = async (name) => {selectNavigation(name);await settle();};
   const sources = () => nodes().filter((node) => node.props.className === "dssm-source");
   const expand = (group) => { const toggle = nodes(group).find((node) => node.props.className === "dssm-source-toggle"); if (toggle?.props["aria-expanded"] !== true) toggle.props.onClick(); render(); };
   const textOf = (node) => JSON.stringify(nodes(node).flatMap((item) => item.children.filter((child) => typeof child === "string")));
@@ -121,23 +127,22 @@ try {
   assert.equal(calls.filter((call) => call.url.endsWith("/category-move")).at(-1).body.category, "", "没有分类时也可排序未分类技能");
   assert.equal(nodes(codex).some((node) => node.props.className === "dssm-cat"), false, "没建分类时不套分类层");
   assert.ok(rows().includes("codex-one"), "没建分类时技能仍平铺");
-  assert.ok(nodes(codex).some((node) => String(node.props.label || "").includes(t("source.toggle"))), "已有来源开关的来源仍用那颗开关");
-  assert.equal(nodes(dsh).some((node) => String(node.props.label || "").includes(t("source.toggle"))), true, "DSH 打开来源级总开关");
+  assert.equal(nodes(codex).some((node) => String(node.props.label || "").includes(t("source.toggle"))), false, "库存不提供来源启停");
+  assert.equal(nodes(dsh).some((node) => String(node.props.label || "").includes(t("source.toggle"))), false, "DSH 库存不提供来源启停");
   assert.equal(nodes(dsh).some((node) => node.children.includes(t("category.enableAll")) || node.children.includes(t("category.disableAll"))), false, "DSH 不再用全部开启和全部关闭");
   assert.ok(nodes(dsh).some((node) => node.props.className === "dssm-skill-row"), "技能行有独立容器");
   assert.ok(nodes(dsh).some((node) => node.props.className === "dssm-cat" && node.props["aria-label"] === "工作"), "分类嵌在来源里");
   const work = nodes(dsh).find((node) => node.props.className === "dssm-cat" && node.props["aria-label"] === "工作");
   assert.deepEqual(nodes(work).filter((node) => node.props.className === "dssm-name").map((node) => node.children[0]), ["kept", "other"], "只列出归入该分类的技能");
   const workSwitch = nodes(work).find((node) => node.props.label === t("category.toggle") + " 工作");
-  assert.equal(workSwitch.props.checked, false, "没有全部开启时分类开关显示关");
-  assert.equal(typeof workSwitch.props.onChange, "function", "分类启停走宿主 Switch 的 onChange 契约");
+  assert.equal(workSwitch, undefined, "分类只组织库存，不提供启停");
   assert.ok(textOf(work).includes(t("category.progress", { count: 2, enabled: 1, usable: 2 })), "部分开启写在数量里");
   const loose = nodes(dsh).find((node) => node.props.className === "dssm-cat" && node.props["aria-label"] === t("category.uncategorized"));
   assert.deepEqual(nodes(loose).filter((node) => node.props.className === "dssm-name").map((node) => node.children[0]), ["loose"]);
   const more = nodes(loose).find((node) => node.props["aria-label"] === t("btn.more"));
   assert.ok(more.props.options.some((option) => option.label === t("category.assign", { name: "工作" })), "归类放进已有的更多");
   assert.ok(more.props.options.some((option) => option.value === "detail"), "查看详情放进更多");
-  assert.ok(more.props.options.some((option) => option.value === "trash" && option.danger), "删除技能放进更多");
+  assert.equal(more.props.options.some(option => option.value === "trash"), false, "技能菜单不提供回收");
   const create = nodes(dsh).find((node) => node.props["aria-label"] === t("category.create"));
   assert.ok(create && create.props.icon, "新建分类是图标");
   assert.equal((create.children || []).includes(t("category.create")), false);
@@ -238,8 +243,7 @@ try {
   assert.equal(noteCall.body.note, "我的自定义中文备注");
 
   const keptToggle = nodes(work).find((node) => node.props.label === t("skill.toggle") + " kept");
-  assert.equal(typeof keptToggle.props.onChange, "function", "技能启停走宿主 Switch 的 onChange 契约");
-  assert.equal(keptToggle.props.checked, true, "已启用的技能开关 aria 状态为 true");
+  assert.equal(keptToggle, undefined, "库存技能不提供全局启停");
   const css = nodes().filter((node) => node.type === "style").map((node) => node.children.join("")).join("");
   assert.ok(!css.includes(".dssm-enable-switch"), "开关不再使用自绘样式（宿主 Switch 接管）");
   assert.match(css, /\.dssm-skill-row\{[^}]*padding:11px 13px/, "技能行留白对齐仓库行");
@@ -250,62 +254,17 @@ try {
   assert.doesNotMatch(css, /#1677ff\b|rgba?\(\s*22\s*[, ]\s*119\s*[, ]\s*255\b/i, "禁止重新引入 antd 默认蓝色");
   assert.match(css, /\.dssm-stat\{[^}]*padding:4px 10px/, "顶部统计格子更矮");
 
-  await tab("项目技能");
-  const picker = find(node => node.props["aria-label"] === t("filter.workspace"));
-  assert.ok(picker, "项目页使用顶部工作区选择器");
-  assert.ok(picker.props.options.some(option => option.label === "empty-notes"), "空工作区也列在浏览下拉中");
-  assert.equal(nodes().some(node => node.props.className === "dssm-workspace"), false, "移除外层工作区折叠");
-  const projectSource = sources().find((node) => node.props["data-source-key"] === "project-dsh:a");
-  assert.ok(projectSource, "找到项目来源卡片");
-  assert.equal(projectSource.props.className, "dssm-source", "项目来源仍是来源卡片");
-  assert.ok(nodes(projectSource).some((node) => node.props.className === "dssm-cat" && node.props["aria-label"] === "项目工作"), "项目来源内部再套分类");
-  nodes(projectSource).find((node) => node.props.label === t("category.toggle") + " 项目工作").props.onChange(true);
-  await tick(); await tick(); render();
-  const projectToggle = calls.filter((call) => call.url.endsWith("/category-disable")).at(-1);
-  assert.equal(projectToggle.body.root, "project-dsh:a");
-  assert.equal(projectToggle.body.category, "pwork");
-  assert.equal(projectToggle.body.workspace, "D:/work/alpha");
-
-  // 模态确认必须保留发起来源的工作区，不能改用当前所选项或 session。
-  const modalFailures = [];
-  for (const [action, route] of [["category.create", "/category-create"], ["category.rename", "/category-rename"], ["category.delete", "/category-delete"]]) {
-    const source = sources().find(node => textOf(node).includes("alpha-one"));
-    nodes(source).find(node => node.props["aria-label"] === t(action)).props.onClick();
-    render();
-    if (action !== "category.delete") {
-      find(node => node.props["aria-label"] === t("category.name")).props.onChange({ target: { value: "新的分类" } });
-      render();
-    }
-    find(node => node.props["aria-label"] === t("filter.workspace")).props.onChange("D:/work/empty");
-    await settle();
-    const expectedConfirmText = action === "category.rename" ? t("btn.confirm") : t(action);
-    const confirmBtn = nodes().filter(node => node.children.includes(expectedConfirmText) && node.props.onClick).at(-1);
-    assert.ok(confirmBtn, `应严格找到文案为「${expectedConfirmText}」的模态确认按钮`);
-    confirmBtn.props.onClick();
-    await settle();
-    const call = calls.filter(call => call.url.endsWith(route)).at(-1);
-    try { assert.equal(call?.body.workspace, "D:/work/alpha", route + " 保留原工作区"); }
-    catch (error) { modalFailures.push(error.message); }
-    assert.equal(call?.body.root, "project-dsh:a");
-    find(node => node.props["aria-label"] === t("filter.workspace")).props.onChange("D:/work/alpha");
-    await settle();
-  }
-  assert.deepEqual(modalFailures, [], "分类创建/重命名/删除均携带原工作区登记路径");
-
-  await tab("全局技能");
-  find((node) => node.props["aria-label"] === t("btn.create")).props.onClick();
-  await settle();
-  find((node) => node.props["aria-label"] === t("dest.scope")).props.onChange("workspace");
-  render();
-  const workspaceOptions = find((node) => node.props["aria-label"] === t("dest.workspace")).props.options.map((option) => option.label);
-  assert.ok(workspaceOptions.includes("empty-notes"), "创建下拉仍列出没有技能的已登记工作区");
-  assert.ok(workspaceOptions.includes("alpha"));
+  assert.equal(find(node => node.props['aria-label'] === t('filter.workspace')), undefined, '分类页没有项目选择器');
+  assert.equal(nodes().some(node => node.props['data-inventory-scope'] === 'project'), false);
+  assert.equal(find(node => node.props['aria-label'] === t('btn.create') || node.props['aria-label'] === t('trash.title')), undefined);
+  assert.equal(calls.some(call => call.url.endsWith('/workspace-skills')), false, '分类库存不读取项目');
+  for (const call of calls.filter(call => /\/(?:category-|skill-note)/.test(call.url))) assert.equal('workspace' in call.body, false, '全局分类操作不携带项目路径');
 
   find((node) => node.props.placeholder === t("search.placeholder")).props.onChange({ target: { value: "kept" } });
   render();
   const searched = nodes(sources().find((node) => textOf(node).includes("kept"))).find((node) => node.props.className === "dssm-cat" && node.props["aria-label"] === "工作");
   assert.deepEqual(nodes(searched).filter((node) => node.props.className === "dssm-name").map((node) => node.children[0]), ["kept"], "搜索只显示匹配技能");
-  assert.equal(nodes(searched).find((node) => node.props.label === t("category.toggle") + " 工作").props.checked, false, "搜索不能把分类开关显示成整组已开启");
+  assert.equal(nodes(searched).find((node) => node.props.label === t("category.toggle") + " 工作"), undefined, "搜索也不显示分类启停");
   assert.ok(textOf(searched).includes(t("category.progress", { count: 2, enabled: 1, usable: 2 })), "分类数量仍按整组计算");
 
   console.log("categories ui ok");

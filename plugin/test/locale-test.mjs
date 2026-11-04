@@ -172,8 +172,8 @@ ok(
   "settings title uses a dedicated title row for external actions",
 );
 ok(
-  /className: "dssm-feedback-links"/.test(source),
-  "settings title groups the project and feedback links together",
+  /label:t\('help.menu'\)/.test(source),
+  "settings title consolidates external links in help menu",
 );
 ok(
   !(await readFile(new URL("../src/plugin-ui.ts", import.meta.url), "utf8")).includes("from \"antd"),
@@ -188,12 +188,12 @@ ok(
   "project link GitHub icon follows the active theme color",
 );
 ok(
-  /icon: h\(GithubMark16\)/.test(source),
-  "project link keeps the GitHub icon on an Ant Design button",
+  /value:'project',label:t\('link.project'\)/.test(source),
+  "project link is a localized help menu item",
 );
 ok(
-  /icon: h\(FeedbackIcon\)/.test(source),
-  "feedback link keeps its icon on an Ant Design button",
+  /value:'feedback',label:t\('link.feedback'\)/.test(source),
+  "feedback link is a localized help menu item",
 );
 ok(
   !source.includes(".dssm-feedback-link{"),
@@ -210,7 +210,7 @@ ok(
   "feedback link points to the skill-loadout issue tracker",
 );
 ok(
-  /"aria-label": t\("link\.feedback"\)/.test(source) &&
+  /label:t\('link.feedback'\)/.test(source) &&
   /_blank/.test(source) && /noreferrer/.test(source),
   "feedback link opens safely with a localized accessible name",
 );
@@ -727,12 +727,12 @@ ok(
 );
 eq(
   DICT.zh["status.enabled"],
-  "已启用",
+  "本会话可用",
   "Chinese status describes invocation policy without claiming body loading",
 );
 eq(
   DICT.en["status.enabled"],
-  "Enabled",
+  "Available in this session",
   "English status describes invocation policy without claiming body loading",
 );
 ok(
@@ -780,8 +780,8 @@ eq(
     { skill: { enabled: true, loadable: true, shadowedBy: { root: "dsh" } } },
     { skill: { enabled: false, loadable: false } },
   ])),
-  JSON.stringify({ total: 5, enabled: 2, disabled: 1, unloaded: 0, shadowed: 1, invalid: 1 }),
-  "summary counts match status-filter buckets（含守门人的 unloaded 桶）",
+  JSON.stringify({ total: 5, enabled: 2, disabled: 0, unloaded: 1, shadowed: 1, invalid: 1 }),
+  "summary counts match session availability and inventory status buckets",
 );
 ok(
   DICT.zh["dest.scope.workspace"] && DICT.en["dest.scope.workspace"] && DICT.zh["workspace.noSkills"] && DICT.en["workspace.noSkills"] && DICT.en["trash.source"],
@@ -1017,11 +1017,11 @@ ok(
   "import modal renders upload feedback where it remains visible",
 );
 ok(
-  /setResult\(null\);\s*setUpload\(null\);\s*setImportDestination\(defaultDestination\(\)\);\s*setModal\("import"\)/.test(source),
+  /setResult\(null\);\s*setUpload\(null\);\s*setImportDestination\(\{\.\.\.defaultDestination\(\),scope:'user',workspace:''\}\);\s*setModal\("import"\)/.test(source),
   "opening import clears stale upload feedback and selection",
 );
 ok(
-  /filterActionButton\(t\("btn\.refresh"\),\s*uiIcon\("refresh"\),\s*function \(\) \{ refresh\(false\);/.test(source),
+  /filterActionButton\(t\(["']btn\.refresh["']\),\s*uiIcon\(["']refresh["']\)/.test(source),
   "settings exposes an explicit refresh action for project file changes",
 );
 ok(
@@ -1037,9 +1037,8 @@ ok(
   "creation does not depend on the current project or on a single global root",
 );
 ok(
-  source.includes("canToggleSource(root)") &&
-    source.includes('root.kind !== "project-dsh"'),
-  "source-level toggles are available for Agent sources on both tabs, except DSH roots",
+  !source.includes("if (canToggleSource(root)) actions.push"),
+  "source-level enable controls are absent from inventory",
 );
 ok(
   !source.includes('"status.discovered"'),
@@ -1054,7 +1053,7 @@ ok(
   "internal status styling also uses enabled terminology",
 );
 ok(
-  /h\(SourceSelect,\s*\{\s*value:\s*activeSource,\s*label:\s*t\("filter.source"\),\s*options(?:\s*:\s*options)?/.test(
+  /h\(SourceSelect,\s*\{\s*value:\s*activeSource,\s*label:\s*t\(["']filter.source["']\),\s*options(?:\s*:\s*options)?/.test(
     source,
   ),
   "source selector uses the validated source key",

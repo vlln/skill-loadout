@@ -115,11 +115,12 @@ try {
   // 5. 在项目页启停只改该项目的副本策略，不影响全局同名技能。
   const root = detail.roots.find((item) => item.kind === "project-dsh");
   response = await post("/disable", { workspace: plain, root: root.key, name: "global-skill" });
-  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(response.status, 400, await response.clone().text());
+  assert.equal((await response.json()).code, "error.policy.sessionOnly");
   const after = (await (await post("/workspace-skills", { workspace: plain })).json()).data;
   assert.equal(after.roots.find((item) => item.kind === "project-dsh").skills.find((s) => s.name === "global-skill").managerEnabled, false);
   const user = (await get("/state")).roots.find((item) => item.key === "dsh");
-  assert.equal(user.skills.find((s) => s.name === "global-skill").managerEnabled, true, "全局副本不受影响");
+  assert.equal(user.skills.find((s) => s.name === "global-skill").managerEnabled, false, "未选编组时全局副本同样不加载");
   response = await post("/enable", { workspace: join(temporary, "work", "unregistered"), root: root.key, name: "global-skill" });
   assert.equal(response.status, 400, "未登记工作区不能改启停");
 
@@ -127,7 +128,8 @@ try {
   const claudeRoot = (await (await post("/workspace-skills", { workspace: gitProject })).json()).data.roots.find((item) => item.kind === "project-claude");
   assert.ok(claudeRoot, "git 项目有 .claude 来源");
   response = await post("/disable", { workspace: gitProject, root: claudeRoot.key, name: "claude-skill" });
-  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(response.status, 400, await response.clone().text());
+  assert.equal((await response.json()).code, "error.policy.sessionOnly");
   response = await post("/disable", { workspace: plain, root: claudeRoot.key, name: "claude-skill" });
   assert.equal(response.status, 400, "其他项目的根 key 不能在这个工作区下使用");
 
@@ -138,7 +140,8 @@ try {
   response = await post("/detail", { workspace: join(temporary, "work", "unregistered"), root: root.key, name: "plain-skill" });
   assert.equal(response.status, 400);
   response = await post("/source-disable", { workspace: gitProject, root: claudeRoot.key });
-  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(response.status, 400, await response.clone().text());
+  assert.equal((await response.json()).code, "error.policy.sessionOnly");
   response = await post("/delete", { workspace: plain, root: root.key, name: "plain-skill" });
   assert.equal(response.status, 200, await response.clone().text());
   const afterDelete = (await (await post("/workspace-skills", { workspace: plain })).json()).data;

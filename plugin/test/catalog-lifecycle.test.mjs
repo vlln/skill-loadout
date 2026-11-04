@@ -156,12 +156,15 @@ try {
       assert.equal(local.status, 200);
     } finally { clearTimeout(timeout); holdDownload = false; releaseDownload(); await installing; await localWriting; }
   });
-  await test("启用写入失败保留意图，修改过的未确认副本不会被恢复认领", async () => {
+  await test("身份确认失败保留意图，修改过的未确认副本不会被恢复认领", async () => {
     installedName = "policy-failure";
     const id = "skillsh:owner/skills/policy-slug";
     const originalRename = fileSystem.rename;
     fileSystem.rename = async (from, to) => {
-      if (to.endsWith("state.json")) throw new Error("模拟启用策略写入失败");
+      if (to.endsWith("repositories.json")) {
+        const pending = JSON.parse(await readFile(from, "utf8"));
+        if (pending.catalogInstalls.some(record => record.id === id && record.complete)) throw new Error("模拟身份确认失败");
+      }
       return originalRename(from, to);
     };
     let failed;
@@ -200,7 +203,7 @@ try {
     assert.ok((await list()).catalogInstalls.includes(id));
     assert.equal((await stored()).catalogInstalls.find(record => record.id === id).trashId, undefined);
   });
-  await test("恢复未确认安装时保留用户后续明确的停用选择", async () => {
+  await test("恢复未确认安装时保留用户清除的会话选择", async () => {
     installedName = "respect-disable";
     const id = "skillsh:owner/skills/respect-disable-slug";
     const originalRename = fileSystem.rename;
@@ -213,10 +216,11 @@ try {
     };
     try { assert.equal((await install("respect-disable-slug")).status, 500); }
     finally { fileSystem.rename = originalRename; }
-    assert.equal((await post("/disable", { root: "dsh", name: installedName })).status, 200);
+    assert.equal((await post("/disable", { root: "dsh", name: installedName })).status, 400);
+    assert.equal((await post("/session-loadout", { sessionId: "recover-session", loadoutId: null })).status, 200);
     assert.ok((await list()).catalogInstalls.includes(id), "副本仍然已安装，不因停用丢身份");
     const policy = JSON.parse(await readFile(join(process.env.DSH_HOME, "skills-manager/state.json"), "utf8"));
-    assert.ok(policy.disabledSkills.dsh.includes(installedName), "修复来源状态不能重新启用用户明确停用的副本");
+    assert.deepEqual(policy.sessionLoadouts["recover-session"], [], "恢复库存不改变空会话选择");
     assert.ok(!policy.enabledSkills.dsh.includes(installedName));
   });
   await test("永久删除的状态写入失败时保留回收站文件和身份", async () => {
@@ -263,7 +267,10 @@ try {
     const id = "skillsh:owner/skills/pending-broken-policy";
     const originalRename = fileSystem.rename;
     fileSystem.rename = async (from, to) => {
-      if (to.endsWith("state.json")) throw new Error("模拟启用失败");
+      if (to.endsWith("repositories.json")) {
+        const pending = JSON.parse(await readFile(from, "utf8"));
+        if (pending.catalogInstalls.some(record => record.id === id && record.complete)) throw new Error("模拟身份确认失败");
+      }
       return originalRename(from, to);
     };
     try { assert.equal((await install("pending-broken-policy")).status, 500); }

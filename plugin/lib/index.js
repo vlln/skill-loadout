@@ -11,6 +11,9 @@ import {
   setCategoryEnabled,
   setSkillNote,
   createLoadout,
+  updateLoadout,
+  importLegacyLoadout,
+  legacyPolicyError,
   renameLoadout,
   deleteLoadout,
   setLoadoutNote,
@@ -20,6 +23,11 @@ import {
   applyLoadout,
   listLoadouts,
   setSessionLoadout,
+  setSessionLoadouts,
+  getDefaultLoadouts,
+  setDefaultLoadouts,
+  initializeNewSessionLoadouts,
+  setSessionSkillExclusions,
   sessionLoadoutView,
   importSkill,
   importUploadedSkill,
@@ -53,7 +61,7 @@ import { listClawHub, searchClawHub } from "./clawhub-catalog.js";
 import { searchSkillsSh } from "./skills-sh-catalog.js";
 import { loadCatalogPackage, readCatalogSkill } from "./catalog-skill.js";
 const name = "loadout";
-const inject = ["connection", "skills", "tools", "sessions"];
+const inject = ["connection", "skills", "tools", "sessions", "agents", "workingDirectory"];
 const CLIENT_MARKER_HEADER = "x-dsh-loadout";
 const MAX_LOG_BYTES = 1 << 20;
 const MAX_UPLOAD_BODY_BYTES = 88 << 20;
@@ -201,7 +209,11 @@ function activeSessionCwds(ctx, sessionId) {
   const sessions = ctx.sessions || (typeof ctx.get === "function" ? ctx.get("sessions") : void 0);
   if (!sessions) return [];
   const session = typeof sessions.get === "function" ? sessions.get(sessionId) : (typeof sessions.list === "function" ? sessions.list() : []).find((item) => (item.id ?? item.header?.id) === sessionId);
-  const cwd = session?.header?.cwd;
+  let cwd = session?.header?.cwd;
+  if (session && typeof ctx.get === "function") {
+    const workingDirectory = ctx.get("workingDirectory");
+    if (typeof workingDirectory?.get === "function") cwd = workingDirectory.get(session);
+  }
   return typeof cwd === "string" && cwd.trim() ? [cwd.trim()] : [];
 }
 function externalSkillProvider(control, invalidators, sessionId) {
@@ -214,7 +226,7 @@ function externalSkillProvider(control, invalidators, sessionId) {
   return {
     name: "dsh-loadout-external",
     list: async (options) => listProviderCandidates(sessionId ? { ...options || {}, sessionId } : options),
-    get: async (candidate, options) => getProviderSkill(candidate, options)
+    get: async (candidate, options) => getProviderSkill(candidate, sessionId ? { ...options || {}, sessionId } : options)
   };
 }
 function registerAgentSkillProviders(ctx, invalidators) {
@@ -277,6 +289,17 @@ function apply(ctx, config) {
     mutationQueue = queued.catch(() => void 0);
     return queued;
   };
+  ctx.effect(() => {
+    const stop = ctx.on?.("agent/created", ({ agent, source }) => {
+      if (source !== "startup") return;
+      return enqueueMutation(async () => {
+        const result = await initializeNewSessionLoadouts(agent.id, log);
+        if ("ok" in result && result.ok === false) throw Object.assign(new Error(result.error), { code: result.code });
+        afterWrite();
+      });
+    });
+    return typeof stop === "function" ? stop : void 0;
+  }, "loadout new-session initial selection");
   ctx.effect(() => ctx.skills.registerProvider((control) => externalSkillProvider(control, providerInvalidators)), "loadout global external skills provider");
   ctx.effect(() => registerAgentSkillProviders(ctx, providerInvalidators), "skills-manager agent-scoped external skills providers");
   if (ctx.tools && typeof ctx.tools.register === "function") {
@@ -316,7 +339,7 @@ function apply(ctx, config) {
   const API_PREFIX = "/api/vlln/dsh-loadout";
   const projectOptions = (sessionId) => ({ projectCwds: activeSessionCwds(ctx, sessionId ?? void 0) });
   const requestSessionId = (req) => {
-    const value = req.headers.get("x-dsh-skills-session");
+    const value = new URL(req.url).searchParams.get("sessionId") ?? req.headers.get("x-dsh-skills-session");
     return typeof value === "string" && value.trim() ? value.trim() : void 0;
   };
   const sessionOptions = (sessionId) => ({
@@ -365,7 +388,7 @@ function apply(ctx, config) {
         error: String(e && e.message ? e.message : e)
       });
     }
-    if (options?.isRepo && (!body || typeof body !== "object" || Array.isArray(body))) {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
       return jsonResponse(400, { ok: false, code: "error.repo.invalid", error: "\u4ED3\u5E93\u53C2\u6570\u5FC5\u987B\u662F\u5BF9\u8C61" });
     }
     const execute = async () => {
@@ -425,13 +448,7 @@ function apply(ctx, config) {
         if (req.method === "GET" || req.method === "HEAD") {
           return runFetch(async () => ({ enabled: await getGatekeeper() }), void 0, req.method === "HEAD");
         }
-        return handlePost(req, async (b) => {
-          if (!b || typeof b.enabled !== "boolean") {
-            throw Object.assign(new Error("enabled \u5FC5\u987B\u662F\u5E03\u5C14\u503C"), { statusCode: 400, code: "error.proto.invalidParams" });
-          }
-          const enabled = await setGatekeeper(b.enabled);
-          return { enabled };
-        }, { afterSuccess: afterWrite });
+        return handlePost(req, async () => legacyPolicyError());
       }
     },
     {
@@ -561,28 +578,28 @@ function apply(ctx, config) {
     {
       path: `${API_PREFIX}/enable`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, async (b, scope) => setSkillEnabled(await requestRoot(String(b.root || "dsh"), scope?.projectCwds, req.headers.get("x-dsh-skills-session")), String(b.name || ""), true, log), { afterSuccess: afterWrite })
+      fetch: (req) => handlePost(req, async () => legacyPolicyError())
     },
     {
       path: `${API_PREFIX}/disable`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, async (b, scope) => setSkillEnabled(await requestRoot(String(b.root || "dsh"), scope?.projectCwds, req.headers.get("x-dsh-skills-session")), String(b.name || ""), false, log), { afterSuccess: afterWrite })
+      fetch: (req) => handlePost(req, async () => legacyPolicyError())
     },
     {
       // 守门人语义的单技能开关：引用 / 取消引用（写或清 enabledSkills override，不写 disabled）。
       path: `${API_PREFIX}/skill-reference`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, async (b, scope) => setSkillReferenced(await requestRoot(String(b.root || "dsh"), scope?.projectCwds, req.headers.get("x-dsh-skills-session")), String(b.name || ""), b.referenced === true, log), { afterSuccess: afterWrite })
+      fetch: (req) => handlePost(req, async () => legacyPolicyError())
     },
     {
       path: `${API_PREFIX}/source-enable`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, (b, scope) => setSourceEnabled(String(b.root || ""), true, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite })
+      fetch: (req) => handlePost(req, async () => legacyPolicyError())
     },
     {
       path: `${API_PREFIX}/source-disable`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, (b, scope) => setSourceEnabled(String(b.root || ""), false, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite })
+      fetch: (req) => handlePost(req, async () => legacyPolicyError())
     },
     {
       path: `${API_PREFIX}/root-path`,
@@ -637,12 +654,12 @@ function apply(ctx, config) {
     {
       path: `${API_PREFIX}/category-enable`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, (b, scope) => setCategoryEnabled(String(b.root || ""), String(b.category || ""), true, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite })
+      fetch: (req) => handlePost(req, async () => legacyPolicyError())
     },
     {
       path: `${API_PREFIX}/category-disable`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, (b, scope) => setCategoryEnabled(String(b.root || ""), String(b.category || ""), false, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite })
+      fetch: (req) => handlePost(req, async () => legacyPolicyError())
     },
     {
       path: `${API_PREFIX}/skill-note`,
@@ -650,53 +667,84 @@ function apply(ctx, config) {
       fetch: (req) => handlePost(req, (b, scope) => setSkillNote(String(b.root || ""), String(b.name || ""), String(b.note || ""), log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite })
     },
     {
+      path: `${API_PREFIX}/default-loadouts`,
+      methods: ["GET", "HEAD", "POST"],
+      fetch: (req) => req.method === "GET" || req.method === "HEAD" ? runFetch(() => getDefaultLoadouts(), void 0, req.method === "HEAD") : handlePost(req, (b) => setDefaultLoadouts(b.loadoutIds, log))
+    },
+    {
       path: `${API_PREFIX}/loadouts`,
       methods: ["GET", "HEAD"],
       fetch: (req) => {
-        const u = new URL(req.url);
-        const options = u.searchParams.get("scope") === "user" ? {} : projectOptions(req.headers.get("x-dsh-skills-session"));
-        return runFetch(() => listLoadouts(options), void 0, req.method === "HEAD");
+        return runFetch(() => listLoadouts(sessionOptions(requestSessionId(req))), void 0, req.method === "HEAD");
       }
     },
     {
       path: `${API_PREFIX}/loadout-create`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, (b, scope) => createLoadout(String(b.name || ""), b.note === void 0 ? void 0 : String(b.note), Array.isArray(b.members) ? b.members : void 0, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))))
+      fetch: (req) => handlePost(req, (b, scope) => createLoadout(b.name, b.note, b.members, log, scopedOptions(scope, requestSessionId(req)), b.copyFrom), { afterSuccess: afterWrite })
+    },
+    {
+      path: `${API_PREFIX}/loadout-update`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b, scope) => updateLoadout(String(b.id || ""), b.name, b.note, b.members, log, scopedOptions(scope, requestSessionId(req))), { afterSuccess: afterWrite })
+    },
+    {
+      path: `${API_PREFIX}/loadout-import-legacy`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, (b) => importLegacyLoadout(b.name, log), { afterSuccess: afterWrite })
     },
     {
       path: `${API_PREFIX}/loadout-rename`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, (b) => renameLoadout(String(b.id || ""), String(b.name || ""), log))
+      fetch: (req) => handlePost(req, (b) => renameLoadout(String(b.id || ""), String(b.name || ""), log), { afterSuccess: afterWrite })
     },
     {
       path: `${API_PREFIX}/loadout-note`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, (b) => setLoadoutNote(String(b.id || ""), String(b.note || ""), log))
+      fetch: (req) => handlePost(req, (b) => setLoadoutNote(String(b.id || ""), String(b.note || ""), log), { afterSuccess: afterWrite })
     },
     {
       path: `${API_PREFIX}/loadout-delete`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, (b) => deleteLoadout(String(b.id || ""), log))
+      fetch: (req) => handlePost(req, (b) => deleteLoadout(String(b.id || ""), log), { afterSuccess: afterWrite })
     },
     {
       path: `${API_PREFIX}/loadout-add`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, (b, scope) => addToLoadout(String(b.id || ""), String(b.root || ""), String(b.name || ""), log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))))
+      fetch: (req) => handlePost(req, (b, scope) => addToLoadout(String(b.id || ""), String(b.root || ""), String(b.name || ""), log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite })
     },
     {
       path: `${API_PREFIX}/loadout-remove`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, (b) => removeFromLoadout(String(b.id || ""), String(b.root || ""), String(b.name || ""), log))
+      fetch: (req) => handlePost(req, (b) => removeFromLoadout(String(b.id || ""), String(b.root || ""), String(b.name || ""), log), { afterSuccess: afterWrite })
     },
     {
       path: `${API_PREFIX}/loadout-toggle`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, (b, scope) => setLoadoutEnabled(String(b.id || ""), b.enabled === true, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite })
+      fetch: (req) => handlePost(req, async () => legacyPolicyError())
     },
     {
       path: `${API_PREFIX}/loadout-apply`,
       methods: ["POST"],
-      fetch: (req) => handlePost(req, (b, scope) => applyLoadout(String(b.id || ""), { exclusive: b.exclusive === true }, log, scopedOptions(scope, req.headers.get("x-dsh-skills-session"))), { afterSuccess: afterWrite })
+      fetch: (req) => handlePost(req, async (b) => {
+        if (b.sessionId !== void 0 && typeof b.sessionId !== "string") {
+          throw Object.assign(new Error("sessionId must be a string"), { statusCode: 400, code: "error.session.invalid" });
+        }
+        const sessionId = typeof b.sessionId === "string" ? b.sessionId.trim() : requestSessionId(req);
+        if (!sessionId) return legacyPolicyError();
+        return applyLoadout(String(b.id || ""), {}, log, sessionOptions(sessionId));
+      }, { afterSuccess: afterWrite })
+    },
+    {
+      path: `${API_PREFIX}/session-skill-exclusions`,
+      methods: ["POST"],
+      fetch: (req) => handlePost(req, async (b) => {
+        if (b.sessionId !== void 0 && typeof b.sessionId !== "string") {
+          throw Object.assign(new Error("sessionId must be a string"), { statusCode: 400, code: "error.session.invalid" });
+        }
+        const sessionId = typeof b.sessionId === "string" ? b.sessionId.trim() : requestSessionId(req) || "";
+        return setSessionSkillExclusions(sessionId, b.excludedSkills, log, sessionOptions(sessionId));
+      }, { afterSuccess: afterWrite })
     },
     {
       // 会话级编组覆盖：composer 控件读写它。会话覆盖会改变该会话生效的技能集，
@@ -705,7 +753,7 @@ function apply(ctx, config) {
       methods: ["GET", "HEAD", "POST"],
       fetch: (req) => {
         if (req.method === "GET" || req.method === "HEAD") {
-          const requested = new URL(req.url).searchParams.get("sessionId") || requestSessionId(req) || null;
+          const requested = requestSessionId(req) || null;
           return runFetch(() => sessionLoadoutView(requested, sessionOptions(requested)), void 0, req.method === "HEAD");
         }
         return handlePost(req, async (b) => {
@@ -714,6 +762,12 @@ function apply(ctx, config) {
             throw Object.assign(new Error("sessionId \u5FC5\u987B\u662F\u5B57\u7B26\u4E32"), { statusCode: 400, code: "error.session.invalid" });
           }
           const sessionId = typeof bodySession === "string" && bodySession.trim() ? bodySession.trim() : requestSessionId(req) || "";
+          if (Object.prototype.hasOwnProperty.call(b, "loadoutIds")) {
+            if (Object.prototype.hasOwnProperty.call(b, "loadoutId")) {
+              throw Object.assign(new Error("Provide loadoutIds or loadoutId, not both"), { statusCode: 400, code: "error.proto.invalidParams" });
+            }
+            return setSessionLoadouts(sessionId, b.loadoutIds, log);
+          }
           if (b.loadoutId !== void 0 && b.loadoutId !== null && typeof b.loadoutId !== "string") {
             throw Object.assign(new Error("loadoutId \u5FC5\u987B\u662F\u5B57\u7B26\u4E32\u6216 null"), { statusCode: 400, code: "error.proto.invalidParams" });
           }

@@ -9,7 +9,7 @@ type ScannedCustomSource = {path: string; label: string; group: string; depth: n
 type CustomSourceScanResult = {ok: true; root: string; candidates: ScannedCustomSource[]};
 type ResultMessage = {ok: boolean; text: string; warning?: boolean; scope?: string};
 type ConfirmModal = {type: 'trash-confirm'; root: string; name: string; workspace?: string} | {type: 'delete-confirm'; id: string; name: string} | {type: 'category-create'; root: string; workspace?: string} | {type: 'category-rename'; root: string; id: string; name: string; workspace?: string} | {type: 'category-delete'; root: string; id: string; name: string; workspace?: string} | {type: 'category-add'; root: string; id: string; name: string; workspace?: string; skills: {name: string; declaredName?: string; description?: string; currentCatName: string}[]} | {type: 'root-path'; root: string; label: string; path: string; defaultPath?: string} | {type: 'skill-note'; root: string; name: string; note: string; workspace?: string} | {type: 'loadout-create'} | {type: 'loadout-rename'; id: string; name: string} | {type: 'loadout-note'; id: string; note: string} | {type: 'loadout-delete'; id: string; name: string};
-type ModalState = 'detail' | 'create' | 'import' | ConfirmModal | null;
+type ModalState = 'detail' | 'create' | 'import' | 'add-skills' | ConfirmModal | null;
 import { createRepositoryUI, repositoryLocales } from "./repository-ui.js";
 import { createDestinationKit, defaultDestination, destinationPayload, destinationReady, destinationLocales, destinationCss, type DestinationValue } from "./destination-picker.js";
 import { resolveApiUrl } from "./api-base.js";
@@ -17,7 +17,7 @@ import { createSourceSelect } from "./source-select.js";
 import * as primitives from "@deepseek-ai/dsh-client-ui-primitives";
 import { Button as PrimitiveButton, Modal as PrimitiveModal, Menu, SegmentedTabs, Switch as PrimitiveSwitch, Tag as PrimitiveTag } from "@deepseek-ai/dsh-client-ui-primitives";
 import { Input, foldChevron } from "./plugin-ui.js";
-import { installSettingsNavIcon } from "./settings-nav-icon.js";
+import { installSettingsNavIcon, SKILL_PATHS } from "./settings-nav-icon.js";
 import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } from "./sidebar-entry.js";
 
 // dsh-skills-manager client half：按全局与项目作用域切换的多 Agent Skills 管理面板。
@@ -140,8 +140,8 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
     // 外部来源目录改写的文案单独成块，和仓库/目标选择器一样与主词典合并，减少巨型字典的冲突。
     var ROOT_PATH_LOCALES = {
       zh: {
-        "rootPath.edit": "修改技能目录", "rootPath.title": "修改「{name}」的技能目录",
-        "rootPath.manage": "来源目录", "rootPath.source": "技能来源",
+        "rootPath.edit": "修改扫描位置", "rootPath.title": "修改全局技能扫描位置",
+        "rootPath.manage": "全局技能扫描位置", "rootPath.source": "技能来源",
         "rootPath.desc": "只改本插件读取的位置，不移动任何文件。外部来源仍然只读；要让该 Agent 自己换目录，请改它自己的配置。",
         "rootPath.label": "技能目录（含 SKILL.md 的上一级）", "rootPath.placeholder": "例如 D:\\skills\\codex",
         "rootPath.browse": "浏览…", "rootPath.pickUnavailable": "当前环境没有可用的目录选择器，请直接输入路径。",
@@ -168,8 +168,8 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
         "error.customSource.label": "自定义来源必须有显示名：{path}", "error.customSource.empty": "没有要添加的技能来源",
       },
       en: {
-        "rootPath.edit": "Change skills folder", "rootPath.title": "Change the skills folder for {name}",
-        "rootPath.manage": "Source folders", "rootPath.source": "Skill source",
+        "rootPath.edit": "Edit scan location", "rootPath.title": "Edit global skill scan location",
+        "rootPath.manage": "Global skill scan locations", "rootPath.source": "Skill source",
         "rootPath.desc": "Only changes where this plugin reads skills. No files are moved. External sources stay read-only; to change the agent's own folder, update that agent's configuration.",
         "rootPath.label": "Skills folder (the parent of SKILL.md files)", "rootPath.placeholder": "e.g. D:\\skills\\codex",
         "rootPath.browse": "Browse…", "rootPath.pickUnavailable": "No directory picker is available here; type the path instead.",
@@ -198,6 +198,38 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
     };
 
 
+    const SESSION_LOCALES = {
+      zh: {
+        'desc': '安装进技能库，编组成组，再由每个会话选择使用。',
+        'library.tab': '技能库', 'library.local': '本地 Skills', 'library.install': '安装 Skills', 'library.back': '返回本地 Skills', 'library.installed': '本地库存已更新，可返回查看；安装不会自动加载。', 'scope.user': '全局级', 'scope.project': '项目级', 'loadout.removeSession': '移出本会话', 'loadout.dock.multiple': '{groups} 个编组 · {skills} 个技能', 'loadout.editNamed': '编辑：{name}', 'loadout.edit': '编辑编组', 'loadout.duplicate': '另存为新编组', 'loadout.save': '保存编组', 'loadout.use': '用于本会话', 'loadout.createUse': '创建并用于本会话',
+        'loadout.hint': '编组引用本地库存；会话可选择多组，按成员并集加载。安装不等于加载。', 'loadout.shared': '修改这个共享编组会影响所有使用它的会话。',
+        'loadout.pickMembers': '从全部库存选择成员', 'loadout.noSession': '没有活动会话：可以保存编组，不能选择使用。', 'loadout.saved': '编组已保存。',
+        'loadout.dock.none': '选择技能组', 'loadout.dock.noLoadout': '清空所有编组', 'loadout.dock.manage': '管理编组', 'loadout.dock.history': '切组不会移除已有历史上下文；本插件不管理宿主或预设自带技能。',
+        'loadout.project': '当前项目技能（默认可用）', 'loadout.projectCount': '项目技能 · {count}', 'loadout.excluded': '本会话已排除', 'loadout.projectHint': '勾选表示未排除；无效或同名覆盖仍可能不可用。取消勾选优先于编组选择。', 'loadout.readError': '编组读取失败', 'loadout.available': '可用', 'loadout.missing': '缺失', 'loadout.invalid': '无效', 'loadout.shadowed': '同名覆盖',
+        'error.policy.sessionOnly': '旧加载策略已只读；请编辑编组并为会话选择它。', 'error.loadout.noLegacyReferences': '没有可导入的旧手动引用。',
+        'loadout.legacy': '旧全局启停策略已不参与加载。', 'loadout.importLegacy': '导入旧手动引用', 'loadout.importConfirm': '将旧手动引用复制为普通编组，不自动用于任何会话，不修改技能文件。',
+        'confirm.loadout.desc': '删除「{name}」只移除该组；其他所选组与技能文件保留。',
+        'scope.userHint': '跨项目库存；安装不等于会话加载。', 'scope.projectHint': '按工作区查看库存，不改变会话选择。', 'source.selectHint': '选择来源以查看技能与来源目录。',
+        'status.enabled': '本会话可用', 'status.disabled': '库存', 'status.unloaded': '库存', 'summary.enabled.one': '{count} 个本会话可用', 'summary.enabled.other': '{count} 个本会话可用', 'category.progress': '{count} 项',
+      },
+      en: {
+        'desc': 'Install into the library, organize into groups, then choose groups for each session.',
+        'library.tab': 'Skill library', 'library.local': 'Local Skills', 'library.install': 'Install Skills', 'library.back': 'Back to Local Skills', 'library.installed': 'Local inventory updated. Return to inspect it; installing does not load skills automatically.', 'scope.user': 'Global', 'scope.project': 'Project', 'loadout.removeSession': 'Remove from this session', 'loadout.dock.multiple': '{groups} groups · {skills} skills', 'loadout.editNamed': 'Edit: {name}', 'loadout.edit': 'Edit group', 'loadout.duplicate': 'Save as new group', 'loadout.save': 'Save group', 'loadout.use': 'Use in this session', 'loadout.createUse': 'Create and use in this session',
+        'loadout.hint': 'Groups reference local inventory. Select multiple groups per session to load their union; installing does not load skills.', 'loadout.shared': 'Editing this shared group affects every session using it.',
+        'loadout.pickMembers': 'Select from all inventory', 'loadout.noSession': 'No active session: you can save groups, but cannot select one.', 'loadout.saved': 'Group saved.',
+        'loadout.dock.none': 'Choose skill group', 'loadout.dock.noLoadout': 'Clear all groups', 'loadout.dock.manage': 'Manage groups', 'loadout.dock.history': 'Switching groups does not remove prior context. Host and preset skills are outside this plugin’s control.',
+        'loadout.project': 'Current project skills (available by default)', 'loadout.projectCount': 'Project skills · {count}', 'loadout.excluded': 'Excluded in this session', 'loadout.projectHint': 'Checked means not excluded; invalid or shadowed skills may still be unavailable. Unchecking overrides group membership.', 'loadout.readError': 'Could not read group', 'loadout.available': 'Available', 'loadout.missing': 'Missing', 'loadout.invalid': 'Invalid', 'loadout.shadowed': 'Shadowed',
+        'error.policy.sessionOnly': 'Legacy loading policy is read-only; edit a group and select it for a session.', 'error.loadout.noLegacyReferences': 'There are no legacy manual references to import.',
+        'loadout.legacy': 'Legacy global enable policies no longer control loading.', 'loadout.importLegacy': 'Import legacy manual references', 'loadout.importConfirm': 'Copy legacy manual references into a regular group without selecting it for any session or changing skill files.',
+        'confirm.loadout.desc': 'Deleting “{name}” removes only this group; other selected groups and skill files are kept.',
+        'scope.userHint': 'Cross-project inventory; installing does not load skills into a session.', 'scope.projectHint': 'Browse workspace inventory without changing the session selection.', 'source.selectHint': 'Select a source to inspect its skills and folder.',
+        'status.enabled': 'Available in this session', 'status.disabled': 'Inventory', 'status.unloaded': 'Inventory', 'summary.enabled.one': '{count} available in this session', 'summary.enabled.other': '{count} available in this session', 'category.progress': '{count} items',
+      },
+    };
+    Object.assign(DICT.zh, SESSION_LOCALES.zh);
+    Object.assign(DICT.en, SESSION_LOCALES.en);
+    Object.assign(DICT.zh, {'btn.back':'返回','loadout.dock.otherSkills':'其他技能','loadout.dock.searchEffective':'搜索已生效技能','loadout.clickHint':'点击编组查看或编辑','loadout.defaultColumn':'新会话默认','loadout.sessionColumn':'本会话','library.scanning':'正在扫描…','library.scanned':'扫描完成 · {count} 个技能','loadout.dock.showEffective':'已生效 Skills（{count}）','loadout.dock.projectSkills':'项目技能','loadout.dock.globalSkills':'全局技能','loadout.dock.unknownSource':'来源未确定','loadout.dock.preview':'技能预览','loadout.dock.previewUnavailable':'此技能已不在当前生效名单中。','root.codexSystem':'Codex 内置技能','error.loadout.globalOnly':'编组只能包含全局技能；项目技能请在聊天框管理。','library.searchRemote':'搜索外部技能','library.scan':'本机扫描位置','library.input':'仓库地址','rootPath.title':'修改全局技能扫描位置','rootPath.manage':'全局技能扫描位置','rootPath.edit':'修改扫描位置','loadout.defaultEnabled':'新会话默认启用','loadout.clearDefaults':'取消全部默认编组','loadout.defaultsHint':'仅作为新会话的初始选择；修改默认不会覆盖已有会话。项目技能仍按工作目录默认加载。','library.add':'添加技能','library.sources':'外部技能来源','library.back':'返回技能库','library.local':'本地技能','library.choose':'选择添加方式','library.chooseHint':'添加到技能库后，再按会话选择使用。项目级技能默认可用。','library.git':'从 Git 仓库添加','library.import':'从本地文件或目录导入','library.create':'编写新技能','help.menu':'帮助','loadout.edit':'编辑','loadout.sessionEnabled':'本会话启用','loadout.dock.noLoadout':'取消本会话全部编组','loadout.clearHint':'仅取消编组选择，项目默认技能不受影响。'});
+    Object.assign(DICT.en, {'btn.back':'Back','loadout.dock.otherSkills':'Other skills','loadout.dock.searchEffective':'Search effective skills','loadout.clickHint':'Click a group to view or edit','loadout.defaultColumn':'New session default','loadout.sessionColumn':'This session','library.scanning':'Scanning…','library.scanned':'Scan complete · {count} skills','loadout.dock.showEffective':'Effective Skills ({count})','loadout.dock.projectSkills':'Project skills','loadout.dock.globalSkills':'Global skills','loadout.dock.unknownSource':'Source unavailable','loadout.dock.preview':'Skill preview','loadout.dock.previewUnavailable':'This skill is no longer effective in this session.','root.codexSystem':'Codex bundled','error.loadout.globalOnly':'Groups can only contain global skills. Manage project skills in chat.','library.searchRemote':'Search external skills','library.scan':'Local scan locations','library.input':'Repository address','rootPath.title':'Edit global skill scan location','rootPath.manage':'Global skill scan locations','rootPath.edit':'Edit scan location','loadout.defaultEnabled':'Default for new sessions','loadout.clearDefaults':'Deselect all default groups','loadout.defaultsHint':'Initial selection for new sessions only; changing defaults never overrides existing sessions. Project skills still load by working directory.','library.add':'Add skills','library.sources':'External skill sources','library.back':'Back to library','library.local':'Local skills','library.choose':'Choose how to add skills','library.chooseHint':'Add skills to the library, then select them per session. Project skills are available by default.','library.git':'Add from a Git repository','library.import':'Import local files or folder','library.create':'Write a new skill','help.menu':'Help','loadout.edit':'Edit','loadout.sessionEnabled':'Enabled for this session','loadout.dock.noLoadout':'Deselect all session groups','loadout.clearHint':'Only group selections are removed; project defaults are kept.'});
     Object.assign(DICT.zh, ROOT_PATH_LOCALES.zh, repositoryLocales.zh, destinationLocales.zh, sidebarLocales.zh);
     Object.assign(DICT.en, ROOT_PATH_LOCALES.en, repositoryLocales.en, destinationLocales.en, sidebarLocales.en);
     var SourceSelect = createSourceSelect(react);
@@ -206,7 +238,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
     var HostIconLoading = (primitives as any).IconLoadingOutlineMedium || (primitives as any).IconLoadingOutlineRegular || (primitives as any).IconLoadingOutline16;
     var HostIconRefresh = (primitives as any).IconRefreshOutlineMedium || (primitives as any).IconRefreshOutlineRegular || (primitives as any).IconRefreshOutline16;
     var useRepositoryUI = createRepositoryUI({ react: react, Modal: Modal, Input: Input, Button: PrimitiveButton, SourceSelect: SourceSelect, destination: destinationKit, api: callApi, headers: MUTATION_HEADERS, translateError: translateError, getLocale: hostLocale, IconLoading: HostIconLoading, IconRefresh: HostIconRefresh });
-    var CSS = destinationCss + sidebarEntryCss + `.dssm-sources{display:flex;flex-direction:column;gap:9px}.dssm-scope-tabs{display:grid!important;box-sizing:border-box!important;width:100%;height:32px!important;min-height:32px!important;max-height:32px!important;padding:2px!important;border-radius:var(--dsw-radius-sm,8px)!important;border:0.5px solid var(--dsw-alias-border-l2)!important;background:var(--dsw-alias-bg-layer-1)!important}.dssm-scope-tabs>span[aria-hidden="true"],.dssm-scope-tabs>[class*="indicator"]{width:calc((100% - 4px)/5)!important;inset:2px auto 2px 2px!important;border-radius:6px!important;border:0.5px solid var(--dsw-alias-border-l3,rgba(255,255,255,.12))!important;background:var(--dsw-alias-bg-layer-3,rgba(255,255,255,.08))!important;box-shadow:none!important}.dssm-scope-tabs [role=tab]{display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:4px!important;height:28px!important;padding:0 6px!important;border-radius:6px!important;font-size:13px!important;line-height:20px!important;white-space:nowrap!important;color:var(--dsw-alias-label-secondary)!important;text-align:center!important;box-sizing:border-box!important;transition:color 150ms ease!important}.dssm-scope-tabs [role=tab]:hover{color:var(--dsw-alias-label-primary)!important}.dssm-scope-tabs [role=tab][aria-selected="true"]{color:var(--dsw-alias-label-primary)!important;font-weight:600!important}.dssm-scope-tabs [role=tab] svg{flex:none;display:block}.dssm-source-head{display:flex;align-items:center;gap:8px;min-width:0;padding:8px 12px}.dssm-source-toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;overflow:hidden;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}.dssm-source-toggle:focus-visible{outline:var(--dsw-focus-ring-width,1px) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:2px}.dssm-fold-chevron{flex:none;color:var(--dsw-alias-label-tertiary);transform:rotate(-90deg);transition:transform 160ms ease}.dssm-fold-chevron.is-open{transform:rotate(0deg)}@media (prefers-reduced-motion:reduce){.dssm-fold-chevron{transition:none}}.dssm-source-label{display:flex;align-items:center;gap:10px;min-width:0;flex:1}.dssm-drag-handle{cursor:grab;color:var(--dsw-alias-label-tertiary,#888);font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;width:16px;height:22px;border-radius:var(--dsw-radius-sm,8px);flex-shrink:0;user-select:none;transition:color 0.15s}.dssm-skill-row:hover .dssm-drag-handle{color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-drag-handle:active{cursor:grabbing}.dssm-cat.drag-over{border-color:var(--dsw-alias-brand-primary,#3b82f6);box-shadow:0 0 0 1px var(--dsw-alias-brand-primary,#3b82f6)}.dssm-skill-row.dragging{opacity:0.4;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover,transparent))}.dssm-skill-row.drop-before{box-shadow:inset 0 2px 0 var(--dsw-alias-brand-primary,#3b82f6)}.dssm-skill-row.drop-after{box-shadow:inset 0 -2px 0 var(--dsw-alias-brand-primary,#3b82f6)}.dssm-skill-row{display:flex;align-items:center;gap:8px;margin:0;padding:11px 13px;border:0;border-top:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);border-radius:0;background:transparent}.dssm-skill-copy{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}.dssm-skill-actions{display:flex;align-items:center;gap:8px;flex:none;flex-wrap:nowrap}.dssm-skill-desc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:12px;line-height:18px}.dssm-icon-danger{color:var(--dsw-alias-state-error-primary,#ef7272)}.dssm-skill-row .dssm-name{font-size:14px;font-weight:650;color:var(--dsw-alias-label-primary,#eeeeee)}.dssm-skill-actions{display:flex;align-items:center;gap:8px;flex:none}.dssm-source{overflow:hidden;border:0.5px solid var(--dsw-alias-border-l2,#494949);border-radius:var(--dsw-radius-xl,20px);background:transparent}.dssm-textarea{box-sizing:border-box;display:block;width:100%;min-height:160px;margin:0;padding:8px 12px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:22px;resize:vertical}.dssm-textarea:focus,.dssm-textarea:focus-visible{outline:none;border-color:var(--dsw-alias-state-business-primary)}.dssm-textarea[readonly]{resize:none}.dssm-source-title{font-size:14px;font-weight:650;white-space:nowrap;flex:none}.dssm-source-path{min-width:0;max-width:50%;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:11px}.dssm-source-actions{display:flex;flex:none;align-items:center;gap:8px;margin-left:12px}.dssm-cat{margin:0 10px 8px;border:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);border-radius:var(--dsw-radius-lg,16px)}.dssm-cat-head{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 8px 0 6px}.dssm-cat-main{display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:36px;padding:4px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}.dssm-cat-title{font-size:14px;font-weight:700;display:inline-flex;align-items:center}.dssm-cat-note{margin:2px 16px 8px}.dssm-fallback{margin-top:4px;color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-section{box-sizing:border-box;display:flex;width:100%;min-width:0;padding:2px 0 36px;container-type:inline-size;flex-direction:column;gap:14px;color:var(--dsw-alias-label-primary,#eeeeee);font-family:inherit}.dssm-head{display:flex;flex-direction:column;align-items:stretch;gap:16px}.dssm-title-block{min-width:0}.dssm-title-row{display:flex;align-items:center;gap:8px 12px;min-width:0;flex-wrap:wrap}.dssm-feedback-links{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.dssm-feedback-links>span[data-mpi-check]{display:inline-flex;align-items:center}.dssm-title{margin:0;font-size:24px;line-height:32px;font-weight:600;letter-spacing:-.4px;white-space:nowrap}.dssm-desc{margin:12px 0 0;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:14px;line-height:22px}.dssm-actions{display:flex;flex-wrap:wrap;gap:8px;margin-left:0;flex:none}.dssm-upload-link:focus-visible,.dssm-file-remove:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,var(--dsw-alias-label-primary,#f2f2f2));outline-offset:2px}.dssm-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));overflow:hidden;border:0.5px solid var(--dsw-alias-border-l2,#494949);border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-alias-bg-layer-1)}.dssm-stat{padding:4px 10px;border-right:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-stat:last-child{border-right:0}.dssm-stat strong{margin-right:4px;color:var(--dsw-alias-label-primary,#eeeeee);font-size:14px;font-weight:650}.dssm-filters{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;width:100%!important;min-width:0;box-sizing:border-box}.dssm-filter-actions{display:flex;align-items:center;gap:8px;flex:none;margin-left:auto}.dssm-filters .dssm-search{flex:1 1 0;min-width:160px;max-width:none}.dssm-filters .dssm-source-filter,.dssm-filters .dssm-status-filter,.dssm-filters .dssm-project-filter,.dssm-filters .dssm-menu-select-wrap,.dssm-filters span[class*="_root_"],.dssm-filters .dssm-source-select-menu,.dssm-filters .dssm-menu-select-trigger{width:auto!important;min-width:0!important;display:inline-flex!important;flex:none}.dssm-field .dssm-menu-select-wrap,.dssm-destination-pair .dssm-menu-select-wrap,.dssm-destination-pair span[class*="_root_"]{display:flex!important;width:100%!important;min-width:0!important;height:auto!important;padding:0!important;margin:0!important;border:0!important;background:transparent!important}.dssm-destination-pair .dssm-menu-select-trigger,.dssm-form .dssm-menu-select-trigger{display:flex!important;width:100%!important;height:36px!important;border-radius:var(--dsw-radius-md,10px)!important;padding:0 12px!important;box-sizing:border-box!important}.dssm-source-select-menu{min-width:130px;max-width:280px}.dssm-menu-select-trigger{display:inline-flex;align-items:center;justify-content:space-between;gap:6px;height:32px;padding:0 10px;border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;cursor:pointer;user-select:none;width:max-content;min-width:8em;transition:border-color 120ms ease,background 120ms ease}.dssm-menu-select-trigger:hover:not(:disabled){border-color:var(--dsw-alias-border-l3,#555)}.dssm-menu-select-trigger.is-open,.dssm-menu-select-trigger:focus-visible{border-color:var(--dsw-alias-brand-primary)!important;outline:var(--dsw-focus-ring-width,1px) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary))!important;outline-offset:0!important}.dssm-menu-select-trigger:disabled{opacity:.5;cursor:default}.dssm-menu-select-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;text-align:left}.dssm-menu-select-arrow{color:var(--dsw-alias-label-secondary);flex-shrink:0}.dssm-count{color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:12px;white-space:nowrap;flex:none}.dssm-name{overflow-wrap:anywhere;font-size:13px;font-weight:570}.dssm-note{overflow-wrap:anywhere;margin-top:2px;color:var(--dsw-alias-label-secondary,#b9b9b9);font-size:11px;line-height:17px}.dssm-enabled{color:var(--dsw-alias-state-success-primary,#51b976);font-size:12px;white-space:nowrap}.dssm-disabled{color:var(--dsw-alias-state-warn-primary,#d49245);font-size:12px;white-space:nowrap}.dssm-shadowed{color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:12px;white-space:nowrap}.dssm-trash-count{padding:2px 7px;border-radius:999px;corner-shape:round;background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12));color:var(--dsw-alias-label-secondary,#b9b9b9);font-size:11px}.dssm-empty{padding:25px 14px;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:12px;text-align:center}.dssm-feedback{padding:9px 11px;border:0.5px solid var(--dsw-alias-border-l2,#494949);border-radius:var(--dsw-radius-lg,16px);color:var(--dsw-alias-label-secondary,#b9b9b9);font-size:12px}.dssm-warning{border-color:var(--dsw-alias-state-warn-primary,#d49245);color:var(--dsw-alias-state-warn-primary,#d49245)}.dssm-error{border-color:var(--dsw-alias-state-error-primary,#ef7272);color:var(--dsw-alias-state-error-primary,#ef7272)}.dssm-form,.dssm-field,.dssm-detail-section{display:flex;flex-direction:column}.dssm-form{gap:12px}.dssm-detail{display:flex;flex-direction:column;gap:12px;min-width:0}.dssm-detail .dssm-desc{margin:0}.dssm-field{gap:6px}.dssm-label{font-size:12px;color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-detail-title{font-size:14px;line-height:22px;font-weight:650}.dssm-help{margin:0;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:11px;line-height:18px}.dssm-batch-list{display:flex;flex-direction:column;gap:6px;max-height:360px;overflow-y:auto;margin:12px 0;padding:2px}.dssm-batch-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover,transparent));cursor:pointer;user-select:none;transition:background 0.15s,border-color 0.15s}.dssm-batch-item:hover{background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover,transparent));border-color:var(--dsw-alias-border-l2,#494949)}.dssm-batch-item.selected{border-color:var(--dsw-alias-brand-primary,#3b82f6);background:var(--dsw-alias-state-business-tertiary)}.dssm-batch-item input[type="checkbox"]{cursor:pointer;margin:0;flex-shrink:0;width:15px;height:15px}.dssm-batch-info{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.dssm-batch-name-row{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}.dssm-batch-name{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary,#eee);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dssm-batch-cat-tag{font-size:10px;padding:1px 6px;border-radius:var(--dsw-radius-xs,4px);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary,#b9b9b9);white-space:nowrap;flex-shrink:0}.dssm-batch-desc{font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary,#a0a0a0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}.dssm-modal-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px}.dssm-form+.dssm-modal-actions{margin-top:18px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l2)}.dssm-hidden-input{display:none}.dssm-dropzone{box-sizing:border-box;display:flex;width:100%;min-height:170px;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:22px;border:1px dashed var(--dsw-alias-border-l3,#555555);border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover,transparent));color:var(--dsw-alias-label-secondary,#b9b9b9);transition:border-color 180ms ease,background 180ms ease}.dssm-dropzone:hover,.dssm-dropzone-active{border-color:var(--dsw-alias-brand-primary,var(--dsw-alias-label-primary,#f2f2f2));background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12))}.dssm-dropzone-title{color:var(--dsw-alias-label-primary,#eeeeee);font-size:14px;font-weight:620}.dssm-dropzone-copy{font-size:12px;line-height:18px;text-align:center}.dssm-upload-choices{display:flex;align-items:center;gap:7px}.dssm-upload-link,.dssm-file-remove{padding:0;border:0;background:transparent;font:inherit;font-size:12px;cursor:pointer}.dssm-upload-link{color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-upload-link:hover{color:var(--dsw-alias-label-primary,#eeeeee);text-decoration:underline}.dssm-upload-link:disabled{opacity:.45;cursor:default}.dssm-upload-divider{color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:11px}.dssm-file{display:flex;align-items:center;gap:9px;padding:10px 11px;border:0.5px solid var(--dsw-alias-border-l2,#494949);border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover,transparent));color:var(--dsw-alias-label-primary,#eeeeee);font-size:12px}.dssm-file-kind{display:inline-flex;min-width:30px;height:24px;align-items:center;justify-content:center;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12));color:var(--dsw-alias-label-secondary,#b9b9b9);font-size:9px;font-weight:700}.dssm-file-name{min-width:0;overflow:hidden;flex:1;text-overflow:ellipsis;white-space:nowrap}.dssm-file-meta{color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:11px;white-space:nowrap}.dssm-file-remove{width:24px;height:24px;color:var(--dsw-alias-label-secondary,#b9b9b9);font-size:18px}.dssm-upload-requirements{padding:1px 1px 0}.dssm-upload-requirements ul{display:flex;margin:7px 0 0;padding-left:18px;flex-direction:column;gap:5px;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:11px;line-height:17px}.dssm-detail-section{gap:7px}.dssm-detail-path{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:14px;line-height:22px}.dssm-detail-section .dssm-note,.dssm-diag{font-size:14px;line-height:22px}.dssm-detail-path{padding:8px 10px;border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover,transparent));color:var(--dsw-alias-label-secondary,#b9b9b9);word-break:break-all}.dssm-diag{padding:8px 10px;border-left:2px solid var(--dsw-alias-state-warn-primary,#d49245);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover,transparent));color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-trash-panel{display:flex;flex-direction:column;gap:10px}.dssm-trash-item{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;padding:11px 13px;border:0.5px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));border-radius:var(--dsw-radius-xl,20px);background:transparent}.dssm-trash-main{min-width:0;display:flex;flex-direction:column;gap:6px}.dssm-trash-item .dssm-name{font-size:14px;line-height:20px;color:var(--dsw-alias-label-primary,inherit)}.dssm-trash-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:11px;line-height:17px;color:var(--dsw-alias-label-tertiary,#909090);overflow-wrap:anywhere}.dssm-trash-source{min-width:0;background:transparent;color:var(--dsw-alias-label-tertiary,#a0a0a0)}.dssm-trash-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    var CSS = destinationCss + sidebarEntryCss + `.dssm-sources{display:flex;flex-direction:column;gap:9px}.dssm-scope-tabs{display:grid!important;box-sizing:border-box!important;width:100%;height:32px!important;min-height:32px!important;max-height:32px!important;padding:2px!important;border-radius:var(--dsw-radius-sm,8px)!important;border:0.5px solid var(--dsw-alias-border-l2)!important;background:var(--dsw-alias-bg-layer-1)!important}.dssm-scope-tabs>span[aria-hidden="true"],.dssm-scope-tabs>[class*="indicator"]{width:calc((100% - 4px)/2)!important;inset:2px auto 2px 2px!important;border-radius:6px!important;border:0.5px solid var(--dsw-alias-border-l3,rgba(255,255,255,.12))!important;background:var(--dsw-alias-bg-layer-3,rgba(255,255,255,.08))!important;box-shadow:none!important}.dssm-scope-tabs [role=tab]{display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:4px!important;height:28px!important;padding:0 6px!important;border-radius:6px!important;font-size:13px!important;line-height:20px!important;white-space:nowrap!important;color:var(--dsw-alias-label-secondary)!important;text-align:center!important;box-sizing:border-box!important;transition:color 150ms ease!important}.dssm-scope-tabs [role=tab]:hover{color:var(--dsw-alias-label-primary)!important}.dssm-scope-tabs [role=tab][aria-selected="true"]{color:var(--dsw-alias-label-primary)!important;font-weight:600!important}.dssm-scope-tabs [role=tab] svg{flex:none;display:block}.dssm-source-head{display:flex;align-items:center;gap:8px;min-width:0;padding:8px 12px}.dssm-source-toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;overflow:hidden;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}.dssm-source-toggle:focus-visible{outline:var(--dsw-focus-ring-width,1px) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:2px}.dssm-fold-chevron{flex:none;color:var(--dsw-alias-label-tertiary);transform:rotate(-90deg);transition:transform 160ms ease}.dssm-fold-chevron.is-open{transform:rotate(0deg)}@media (prefers-reduced-motion:reduce){.dssm-fold-chevron{transition:none}}.dssm-source-label{display:flex;align-items:center;gap:10px;min-width:0;flex:1}.dssm-drag-handle{cursor:grab;color:var(--dsw-alias-label-tertiary,#888);font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;width:16px;height:22px;border-radius:var(--dsw-radius-sm,8px);flex-shrink:0;user-select:none;transition:color 0.15s}.dssm-skill-row:hover .dssm-drag-handle{color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-drag-handle:active{cursor:grabbing}.dssm-cat.drag-over{border-color:var(--dsw-alias-brand-primary,#3b82f6);box-shadow:0 0 0 1px var(--dsw-alias-brand-primary,#3b82f6)}.dssm-skill-row.dragging{opacity:0.4;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover,transparent))}.dssm-skill-row.drop-before{box-shadow:inset 0 2px 0 var(--dsw-alias-brand-primary,#3b82f6)}.dssm-skill-row.drop-after{box-shadow:inset 0 -2px 0 var(--dsw-alias-brand-primary,#3b82f6)}.dssm-skill-row{display:flex;align-items:center;gap:8px;margin:0;padding:11px 13px;border:0;border-top:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);border-radius:0;background:transparent}.dssm-skill-copy{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}.dssm-skill-actions{display:flex;align-items:center;gap:8px;flex:none;flex-wrap:nowrap}.dssm-skill-desc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:12px;line-height:18px}.dssm-icon-danger{color:var(--dsw-alias-state-error-primary,#ef7272)}.dssm-skill-row .dssm-name{font-size:14px;font-weight:650;color:var(--dsw-alias-label-primary,#eeeeee)}.dssm-skill-actions{display:flex;align-items:center;gap:8px;flex:none}.dssm-source{overflow:hidden;border:0.5px solid var(--dsw-alias-border-l2,#494949);border-radius:var(--dsw-radius-xl,20px);background:transparent}.dssm-textarea{box-sizing:border-box;display:block;width:100%;min-height:160px;margin:0;padding:8px 12px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:22px;resize:vertical}.dssm-textarea:focus,.dssm-textarea:focus-visible{outline:none;border-color:var(--dsw-alias-state-business-primary)}.dssm-textarea[readonly]{resize:none}.dssm-source-title{font-size:14px;font-weight:650;white-space:nowrap;flex:none}.dssm-source-path{min-width:0;max-width:50%;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:11px}.dssm-source-actions{display:flex;flex:none;align-items:center;gap:8px;margin-left:12px}.dssm-cat{margin:0 10px 8px;border:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);border-radius:var(--dsw-radius-lg,16px)}.dssm-cat-head{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 8px 0 6px}.dssm-cat-main{display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:36px;padding:4px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}.dssm-cat-title{font-size:14px;font-weight:700;display:inline-flex;align-items:center}.dssm-cat-note{margin:2px 16px 8px}.dssm-fallback{margin-top:4px;color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-section{box-sizing:border-box;display:flex;width:100%;min-width:0;padding:2px 0 36px;container-type:inline-size;flex-direction:column;gap:14px;color:var(--dsw-alias-label-primary,#eeeeee);font-family:inherit}.dssm-head{display:flex;flex-direction:column;align-items:stretch;gap:16px}.dssm-title-block{min-width:0}.dssm-title-row{display:flex;align-items:center;gap:8px 12px;min-width:0;flex-wrap:wrap}.dssm-feedback-links{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.dssm-feedback-links>span[data-mpi-check]{display:inline-flex;align-items:center}.dssm-title{margin:0;font-size:24px;line-height:32px;font-weight:600;letter-spacing:-.4px;white-space:nowrap}.dssm-desc{margin:12px 0 0;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:14px;line-height:22px}.dssm-actions{display:flex;flex-wrap:wrap;gap:8px;margin-left:0;flex:none}.dssm-upload-link:focus-visible,.dssm-file-remove:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,var(--dsw-alias-label-primary,#f2f2f2));outline-offset:2px}.dssm-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));overflow:hidden;border:0.5px solid var(--dsw-alias-border-l2,#494949);border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-alias-bg-layer-1)}.dssm-stat{padding:4px 10px;border-right:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-stat:last-child{border-right:0}.dssm-stat strong{margin-right:4px;color:var(--dsw-alias-label-primary,#eeeeee);font-size:14px;font-weight:650}.dssm-filters{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;width:100%!important;min-width:0;box-sizing:border-box}.dssm-filter-actions{display:flex;align-items:center;gap:8px;flex:none;margin-left:auto}.dssm-filters .dssm-search{flex:1 1 0;min-width:160px;max-width:none}.dssm-filters .dssm-source-filter,.dssm-filters .dssm-status-filter,.dssm-filters .dssm-project-filter,.dssm-filters .dssm-menu-select-wrap,.dssm-filters span[class*="_root_"],.dssm-filters .dssm-source-select-menu,.dssm-filters .dssm-menu-select-trigger{width:auto!important;min-width:0!important;display:inline-flex!important;flex:none}.dssm-field .dssm-menu-select-wrap,.dssm-destination-pair .dssm-menu-select-wrap,.dssm-destination-pair span[class*="_root_"]{display:flex!important;width:100%!important;min-width:0!important;height:auto!important;padding:0!important;margin:0!important;border:0!important;background:transparent!important}.dssm-destination-pair .dssm-menu-select-trigger,.dssm-form .dssm-menu-select-trigger{display:flex!important;width:100%!important;height:36px!important;border-radius:var(--dsw-radius-md,10px)!important;padding:0 12px!important;box-sizing:border-box!important}.dssm-source-select-menu{min-width:130px;max-width:280px}.dssm-menu-select-trigger{display:inline-flex;align-items:center;justify-content:space-between;gap:6px;height:32px;padding:0 10px;border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;cursor:pointer;user-select:none;width:max-content;min-width:8em;transition:border-color 120ms ease,background 120ms ease}.dssm-menu-select-trigger:hover:not(:disabled){border-color:var(--dsw-alias-border-l3,#555)}.dssm-menu-select-trigger.is-open,.dssm-menu-select-trigger:focus-visible{border-color:var(--dsw-alias-brand-primary)!important;outline:var(--dsw-focus-ring-width,1px) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary))!important;outline-offset:0!important}.dssm-menu-select-trigger:disabled{opacity:.5;cursor:default}.dssm-menu-select-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;text-align:left}.dssm-menu-select-arrow{color:var(--dsw-alias-label-secondary);flex-shrink:0}.dssm-count{color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:12px;white-space:nowrap;flex:none}.dssm-name{overflow-wrap:anywhere;font-size:13px;font-weight:570}.dssm-note{overflow-wrap:anywhere;margin-top:2px;color:var(--dsw-alias-label-secondary,#b9b9b9);font-size:11px;line-height:17px}.dssm-enabled{color:var(--dsw-alias-state-success-primary,#51b976);font-size:12px;white-space:nowrap}.dssm-disabled{color:var(--dsw-alias-state-warn-primary,#d49245);font-size:12px;white-space:nowrap}.dssm-shadowed{color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:12px;white-space:nowrap}.dssm-trash-count{padding:2px 7px;border-radius:999px;corner-shape:round;background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12));color:var(--dsw-alias-label-secondary,#b9b9b9);font-size:11px}.dssm-empty{padding:25px 14px;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:12px;text-align:center}.dssm-feedback{padding:9px 11px;border:0.5px solid var(--dsw-alias-border-l2,#494949);border-radius:var(--dsw-radius-lg,16px);color:var(--dsw-alias-label-secondary,#b9b9b9);font-size:12px}.dssm-warning{border-color:var(--dsw-alias-state-warn-primary,#d49245);color:var(--dsw-alias-state-warn-primary,#d49245)}.dssm-error{border-color:var(--dsw-alias-state-error-primary,#ef7272);color:var(--dsw-alias-state-error-primary,#ef7272)}.dssm-form,.dssm-field,.dssm-detail-section{display:flex;flex-direction:column}.dssm-form{gap:12px}.dssm-detail{display:flex;flex-direction:column;gap:12px;min-width:0}.dssm-detail .dssm-desc{margin:0}.dssm-field{gap:6px}.dssm-label{font-size:12px;color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-detail-title{font-size:14px;line-height:22px;font-weight:650}.dssm-help{margin:0;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:11px;line-height:18px}.dssm-batch-list{display:flex;flex-direction:column;gap:6px;max-height:360px;overflow-y:auto;margin:12px 0;padding:2px}.dssm-batch-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border:0.5px solid var(--dsw-alias-border-l1,#3a3a3a);border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover,transparent));cursor:pointer;user-select:none;transition:background 0.15s,border-color 0.15s}.dssm-batch-item:hover{background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover,transparent));border-color:var(--dsw-alias-border-l2,#494949)}.dssm-batch-item.selected{border-color:var(--dsw-alias-brand-primary,#3b82f6);background:var(--dsw-alias-state-business-tertiary)}.dssm-batch-item input[type="checkbox"]{cursor:pointer;margin:0;flex-shrink:0;width:15px;height:15px}.dssm-batch-info{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.dssm-batch-name-row{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}.dssm-batch-name{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary,#eee);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dssm-batch-cat-tag{font-size:10px;padding:1px 6px;border-radius:var(--dsw-radius-xs,4px);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary,#b9b9b9);white-space:nowrap;flex-shrink:0}.dssm-batch-desc{font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary,#a0a0a0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}.dssm-modal-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px}.dssm-form+.dssm-modal-actions{margin-top:18px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l2)}.dssm-hidden-input{display:none}.dssm-dropzone{box-sizing:border-box;display:flex;width:100%;min-height:170px;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:22px;border:1px dashed var(--dsw-alias-border-l3,#555555);border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover,transparent));color:var(--dsw-alias-label-secondary,#b9b9b9);transition:border-color 180ms ease,background 180ms ease}.dssm-dropzone:hover,.dssm-dropzone-active{border-color:var(--dsw-alias-brand-primary,var(--dsw-alias-label-primary,#f2f2f2));background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12))}.dssm-dropzone-title{color:var(--dsw-alias-label-primary,#eeeeee);font-size:14px;font-weight:620}.dssm-dropzone-copy{font-size:12px;line-height:18px;text-align:center}.dssm-upload-choices{display:flex;align-items:center;gap:7px}.dssm-upload-link,.dssm-file-remove{padding:0;border:0;background:transparent;font:inherit;font-size:12px;cursor:pointer}.dssm-upload-link{color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-upload-link:hover{color:var(--dsw-alias-label-primary,#eeeeee);text-decoration:underline}.dssm-upload-link:disabled{opacity:.45;cursor:default}.dssm-upload-divider{color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:11px}.dssm-file{display:flex;align-items:center;gap:9px;padding:10px 11px;border:0.5px solid var(--dsw-alias-border-l2,#494949);border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover,transparent));color:var(--dsw-alias-label-primary,#eeeeee);font-size:12px}.dssm-file-kind{display:inline-flex;min-width:30px;height:24px;align-items:center;justify-content:center;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12));color:var(--dsw-alias-label-secondary,#b9b9b9);font-size:9px;font-weight:700}.dssm-file-name{min-width:0;overflow:hidden;flex:1;text-overflow:ellipsis;white-space:nowrap}.dssm-file-meta{color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:11px;white-space:nowrap}.dssm-file-remove{width:24px;height:24px;color:var(--dsw-alias-label-secondary,#b9b9b9);font-size:18px}.dssm-upload-requirements{padding:1px 1px 0}.dssm-upload-requirements ul{display:flex;margin:7px 0 0;padding-left:18px;flex-direction:column;gap:5px;color:var(--dsw-alias-label-tertiary,#a0a0a0);font-size:11px;line-height:17px}.dssm-detail-section{gap:7px}.dssm-detail-path{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:14px;line-height:22px}.dssm-detail-section .dssm-note,.dssm-diag{font-size:14px;line-height:22px}.dssm-detail-path{padding:8px 10px;border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover,transparent));color:var(--dsw-alias-label-secondary,#b9b9b9);word-break:break-all}.dssm-diag{padding:8px 10px;border-left:2px solid var(--dsw-alias-state-warn-primary,#d49245);background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover,transparent));color:var(--dsw-alias-label-secondary,#b9b9b9)}.dssm-trash-panel{display:flex;flex-direction:column;gap:10px}.dssm-trash-item{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;padding:11px 13px;border:0.5px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));border-radius:var(--dsw-radius-xl,20px);background:transparent}.dssm-trash-main{min-width:0;display:flex;flex-direction:column;gap:6px}.dssm-trash-item .dssm-name{font-size:14px;line-height:20px;color:var(--dsw-alias-label-primary,inherit)}.dssm-trash-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:11px;line-height:17px;color:var(--dsw-alias-label-tertiary,#909090);overflow-wrap:anywhere}.dssm-trash-source{min-width:0;background:transparent;color:var(--dsw-alias-label-tertiary,#a0a0a0)}.dssm-trash-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 @container(max-width:400px){.dssm-source-path{display:none}}@media(max-width:760px){.dssm-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:720px){.dssm-title-row{flex-wrap:wrap}}@container(max-width:520px){.dssm-trash-item{grid-template-columns:minmax(0,1fr)}.dssm-skill-row{flex-wrap:wrap}.dssm-skill-actions{width:100%;margin-inline-start:0;justify-content:flex-end}.dssm-trash-actions{justify-content:flex-end}.dssm-head{flex-direction:column}.dssm-actions{width:100%;margin-left:0}.dssm-actions button{flex:1}.dssm-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.dssm-stat:nth-child(2){border-right:0}.dssm-stat:nth-child(n+3){border-top:0.5px solid var(--dsw-alias-border-l1,#3a3a3a)}.dssm-filters{flex-wrap:wrap}.dssm-filters .dssm-search{flex:1 1 100%;min-width:0;order:2}.dssm-filters .dssm-filter-actions{order:3;margin-left:auto}.dssm-filters .dssm-source-filter,.dssm-filters .dssm-status-filter,.dssm-filters .dssm-project-filter{flex:1 1 calc(50% - 4px);min-width:0;order:1}.dssm-filters .dssm-source-filter .dssm-menu-select-wrap,.dssm-filters .dssm-status-filter .dssm-menu-select-wrap,.dssm-filters .dssm-project-filter .dssm-menu-select-wrap{width:100%!important;display:flex!important}.dssm-filters .dssm-source-filter .dssm-menu-select-trigger,.dssm-filters .dssm-status-filter .dssm-menu-select-trigger,.dssm-filters .dssm-project-filter .dssm-menu-select-trigger{width:100%!important;min-width:0!important}}.dssm-row-state{display:flex;align-items:center;justify-content:flex-end;gap:8px}
 
 .dssm-icon-action{width:22px;min-width:22px;height:22px;padding:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-secondary,#b9b9b9);border-color:var(--dsw-alias-border-l2,#494949)}.dssm-icon-action:not(:disabled):not(.dssm-icon-danger):hover{color:var(--dsw-alias-link,#4176e6)!important;border-color:var(--dsw-alias-link,#4176e6)!important}.dssm-icon-action.dssm-icon-danger{color:var(--dsw-alias-state-error-primary,#ef7272);border-color:var(--dsw-alias-state-error-primary,#ef7272)}.dssm-btn-danger:not(:disabled){color:var(--dsw-alias-state-error-primary,#ef7272)}
@@ -231,8 +263,43 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
 .dssm-detail-body{box-sizing:border-box;width:100%;font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace!important;font-size:13px!important;line-height:20px!important;resize:vertical!important}
 .dssm-skill-desc.dssm-custom-note{color:var(--dsw-alias-label-primary,#fff);font-style:normal}
 .dssm-desc.dssm-desc-secondary{color:var(--dsw-alias-label-tertiary);font-size:12px;margin-top:2px}
+.dssm-library-links{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.dssm-library-links [aria-selected=true]{box-shadow:inset 0 -2px var(--dsw-alias-label-primary);font-weight:600}
+.dssm-inventory-section{display:flex;flex-direction:column;gap:6px;min-width:0}
+.dssm-inventory-heading{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 0}
+.dssm-inventory-heading h3{font:var(--dsw-font-s-strong-14);margin:0}
+.dssm-inventory-section .dssm-empty{padding:12px!important;min-height:0!important}
+.dssm-section{gap:12px!important}
+.dssm-filters{flex-wrap:wrap!important;gap:8px!important}
+.dssm-filters .dssm-search{min-width:140px;flex:1}
 .dssm-loadouts{display:flex;flex-direction:column;gap:9px}
-.dssm-loadout-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.dssm-loadout-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.dssm-group-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;padding:12px 0;border-bottom:0.5px solid var(--dsw-alias-border-l2);min-width:0}
+.dssm-group-main{flex:1 1 160px;min-width:0}
+.dssm-group-expand{display:inline-flex;align-items:center;gap:8px;padding:6px 0;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit;min-width:0}
+.dssm-group-expand:hover{color:var(--dsw-alias-link)}
+.dssm-group-expand:focus-visible{outline:2px solid var(--dsw-alias-border-l3);outline-offset:3px}
+.dssm-group-expanded{flex:1 0 100%;min-width:0}
+.dssm-inline-editor{padding:16px 0 8px;display:flex;flex-direction:column;gap:12px;border-top:0.5px solid var(--dsw-alias-border-l2)}
+.dssm-inline-editor .dssm-batch-list{max-height:280px;overflow-y:auto;border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);gap:0}
+.dssm-inline-editor .dssm-group-candidate{border:0;border-radius:0;padding:8px 12px!important;border-bottom:0.5px solid var(--dsw-alias-border-l1)}
+.dssm-inline-editor .dssm-group-candidate:last-child{border-bottom:0}
+.dssm-inline-editor .dssm-field{font:var(--dsw-font-xs-13);gap:4px}
+.dssm-inline-editor .dssm-form{gap:10px}
+.dssm-inline-editor .dssm-modal-actions{display:flex;justify-content:flex-end;gap:8px}
+.dssm-group-row>.dssm-group-actions{margin-left:auto;display:grid;grid-template-columns:100px 28px;gap:12px;align-items:center;justify-items:center}
+.dssm-group-columns{display:grid;grid-template-columns:minmax(0,1fr) 100px 28px;gap:12px;align-items:center;color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xxs-12);padding:8px 0 0}
+.dssm-group-columns>span:nth-child(2){text-align:center}
+.dssm-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.dssm-group-title{display:flex;align-items:center;gap:8px;min-width:0}
+.dssm-group-name{font:var(--dsw-font-s-strong-14);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dssm-group-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+.dssm-group-row .dssm-cat-note{margin:4px 0 0}
+.dssm-library-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.dssm-add-options{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+.dssm-title-row{justify-content:space-between;min-width:0}
+.dssm-loadout-toolbar>button{flex:none}
+.dssm-section .dssm-loadouts{padding:0;margin:0}
 .dssm-loadout-hint{margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary)}
 
 
@@ -248,6 +315,15 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
 .dssm-loadout-member-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dssm-loadout-member-root{flex:none;font-size:12px;color:var(--dsw-alias-label-tertiary)}
 .dssm-loadout-add{display:flex;justify-content:flex-end;padding-top:4px}
+.dssm-modal.dssm-modal-group-editor{width:min(720px,94vw)!important;max-height:88vh!important}
+.dssm-group-candidate{flex-direction:row!important;align-items:center!important;gap:12px!important;padding:7px 12px!important;min-height:34px;box-sizing:border-box}
+.dssm-group-candidate>label{flex:1;min-width:0;overflow:hidden}
+.dssm-group-source{flex:none;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary)}
+.dssm-group-candidate .dssm-batch-info{padding-left:24px;min-width:0}
+.dssm-group-candidate .dssm-batch-desc{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dssm-modal-group-editor .dssm-modal-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+.dssm-modal-group-editor .dssm-modal-actions>*{flex:none}
+
 
 `;
 
@@ -262,7 +338,13 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
       return String(payload == null ? "" : payload);
     }
     function parseApiResponse<T = unknown>(response: Response): Promise<T> { return response.json().catch(function () { var error: CodedError = new Error("non-json response"); error.code = "error.proto.nonJson"; error.params = { status: response.status }; throw error; }).then(function (value: unknown) { const payload = value as {ok?: boolean; data: T}; if (!response.ok || payload.ok === false) throw payload; return payload.data; }); }
-    function callApi<K extends keyof ApiRoutes>(path: K, options?: RequestInit): Promise<ApiRoutes[K]> { return fetch(resolveApiUrl("/api/vlln/dsh-loadout" + path), options).then(parseApiResponse<ApiRoutes[K]>); }
+    function callApi<K extends keyof ApiRoutes>(path: K, options?: RequestInit): Promise<ApiRoutes[K]> {
+      return fetch(resolveApiUrl("/api/vlln/dsh-loadout" + path), options).then(parseApiResponse<ApiRoutes[K]>).then(data => {
+        // Inventory writes outside the group editor must refresh every session view too.
+        if (options?.method === 'POST' && ['/root-path','/custom-source-add','/custom-source-update','/custom-source-remove','/create','/upload','/import','/delete','/trash-restore','/trash-delete','/catalog/install','/repositories/install','/repositories/update','/repositories/updateAll'].includes(path)) notifyLoadoutChanged();
+        return data;
+      });
+    }
     function isSkillEnabled(skill: Partial<SkillView>): boolean { if (skill.enabled !== undefined) return skill.enabled === true; return !!(skill.invocationPolicyValid && skill.modelInvocable && skill.userInvocable && skill.managerEnabled !== false); }
     function countKey(key: string, count: number) { return key + (Number(count) === 1 ? ".one" : ".other"); }
     var localeService: ClientContext["locale"] | undefined;
@@ -298,7 +380,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
         return root.mutable || root.overridden === true || root.exists !== false;
       });
     }
-    function skillStatus(skill: Partial<SkillView>) { return skill.shadowedBy ? "shadowed" : skill.loadable === false ? "invalid" : isSkillEnabled(skill) ? "enabled" : skill.gated === true ? "unloaded" : "disabled"; }
+    function skillStatus(skill: Partial<SkillView>) { return skill.shadowedBy ? "shadowed" : skill.loadable === false || skill.invocationPolicyValid === false || skill.modelInvocable === false && skill.userInvocable === false ? "invalid" : isSkillEnabled(skill) ? "enabled" : "unloaded"; }
     function countSkillStatuses(list: {skill: Partial<SkillView>}[]) {
       var summary: Record<string, number> = { total: list.length, enabled: 0, disabled: 0, unloaded: 0, shadowed: 0, invalid: 0 };
       list.forEach(function (row) { summary[skillStatus(row.skill)]++; });
@@ -582,10 +664,73 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
         return template.replace(/\{(\w+)\}/g, function (_, name) { return String(p[name] ?? "{" + name + "}"); });
       };
     }
+    const LOADOUT_CHANGED = 'dsh-loadout:changed';
+    function notifyLoadoutChanged() { if (typeof window !== 'undefined' && window.dispatchEvent) window.dispatchEvent(new Event(LOADOUT_CHANGED)); }
+    type GroupDraft = { mode: 'create' | 'edit' | 'duplicate' | 'legacy'; loadout?: Loadout };
+    function GroupEditor(props: { t: Translate; sessionId?: string; draft: GroupDraft; inline?: boolean; roots: RootView[]; loading: boolean; readError?: string | null; onRetry?: () => void; onClose: () => void; onSaved: () => void }) {
+      const { t, draft } = props;
+      const [name, setName] = react.useState(draft.mode === 'duplicate' ? '' : draft.loadout?.name || '');
+      const [note, setNote] = react.useState(draft.loadout?.note || '');
+      const [members, setMembers] = react.useState<LoadoutMember[]>(draft.loadout?.members.filter(m=>!m.root.startsWith('project-')).map(m => ({...m})) || []);
+      const [query, setQuery] = react.useState('');
+      const [saving, setSaving] = react.useState(false);
+      const [error, setError] = react.useState<string | null>(null);
+      const guard = react.useRef(false);
+      // Keep a successful create id if selecting it fails; retry must not create a duplicate.
+      const savedId = react.useRef<string | null>(null);
+      const keyOf = (m: LoadoutMember) => JSON.stringify([m.root, m.name]);
+      const selected = new Set(members.map(keyOf));
+      // Snapshot opening selection for ordering; draft toggles must never move rows.
+      const openingMembers = react.useRef(members.map(member=>({...member})));
+      const openingSelected = react.useRef(new Set(openingMembers.current.map(keyOf)));
+      const candidates = props.roots.flatMap(root => (root.skills || []).map(skill => ({ root: root.key, name: skill.name, label: skill.declaredName || skill.name, description: skill.description || '', source: t(root.scope === 'project' ? 'scope.project' : 'scope.user') + ' · ' + rootDisplayName(t, root), status: skill.loadable === false || skill.invocationPolicyValid === false || skill.modelInvocable === false && skill.userInvocable === false ? 'invalid' : skill.shadowedBy ? 'shadowed' : 'available' })));
+      for (const member of openingMembers.current) if (!candidates.some(c => keyOf(c) === keyOf(member))) candidates.push({ ...member, label: member.name, description: '', source: member.root, status: 'missing' });
+      const visible = candidates.filter(c => [c.name, c.label, c.description, c.source].some(v => v.toLowerCase().includes(query.trim().toLowerCase()))).sort((a, b) => Number(openingSelected.current.has(keyOf(b))) - Number(openingSelected.current.has(keyOf(a))));
+      const close = () => { if (!guard.current) props.onClose(); };
+      async function save(use: boolean) {
+        if (guard.current || !name.trim() || props.loading || props.readError) return;
+        guard.current = true; setSaving(true); setError(null);
+        const api = dockApiForSession(props.sessionId || '');
+        try {
+          const payload = { name: name.trim(), note: note.trim(), members, ...(draft.mode === 'duplicate' ? {copyFrom: draft.loadout?.id} : {}) };
+          const result = draft.mode === 'legacy'
+            ? await api('/loadout-import-legacy', { method: 'POST', headers: MUTATION_HEADERS, body: JSON.stringify({name: name.trim()}) })
+            : await api(draft.mode === 'edit' || savedId.current ? '/loadout-update' : '/loadout-create', { method: 'POST', headers: MUTATION_HEADERS, body: JSON.stringify({...payload, id: savedId.current || (draft.mode === 'edit' ? draft.loadout?.id : undefined)}) });
+          savedId.current = result.loadout.id;
+          notifyLoadoutChanged();
+          if (use && props.sessionId) {
+            const selection = await api(`/session-loadout?sessionId=${encodeURIComponent(props.sessionId)}`);
+            await api('/session-loadout', { method: 'POST', headers: MUTATION_HEADERS, body: JSON.stringify({sessionId: props.sessionId, loadoutIds: [...new Set([...selection.loadoutIds, result.loadout.id])]}) });
+            notifyLoadoutChanged();
+          }
+          props.onSaved(); props.onClose();
+        } catch (err) { setError(translateError(t, err)); }
+        finally { guard.current = false; setSaving(false); }
+      }
+      return h((props.inline ? 'div' : Modal) as React.ElementType, props.inline ? {className:'dssm-inline-editor',role:'region','aria-label':t('loadout.edit')} : { className:'dssm-modal-group-editor', title: t(draft.mode === 'edit' ? 'loadout.edit' : draft.mode === 'duplicate' ? 'loadout.duplicate' : draft.mode === 'legacy' ? 'loadout.importLegacy' : 'loadout.create'), closeLabel: t('btn.close'), onClose: close },
+        h('div', {className: 'dssm-form'},
+          draft.mode === 'edit' ? h('p', {className: 'dssm-help'}, t('loadout.shared')) : null,
+          draft.mode === 'legacy' ? h('p', {className: 'dssm-help'}, t('loadout.importConfirm')) : null,
+          h('label', {className: 'dssm-field'}, t('loadout.name'), h(Input, {value: name, maxLength: 24, disabled: saving, 'aria-label': t('loadout.name'), onChange: e => setName(e.target.value)})),
+          draft.mode !== 'legacy' ? h(react.Fragment, null,
+            h('label', {className: 'dssm-field'}, t('loadout.note'), h(Input, {value: note, maxLength: 140, disabled: saving, 'aria-label': t('loadout.note'), onChange: e => setNote(e.target.value)})),
+            h('p', {className: 'dssm-help'}, t('loadout.pickMembers') + ' · ' + members.length),
+            h(Input, {value: query, 'aria-label': t('search'), placeholder: t('search.placeholder'), onChange: e => setQuery(e.target.value)}),
+            h('div', {className: 'dssm-batch-list'}, props.loading ? t('loading') : visible.length ? visible.map(c => h((primitives as any).Tooltip,{key:keyOf(c),label:c.description,disabled:!c.description,portal:true,side:'top',delayMs:250,maxWidth:420},h('div', {className: 'dssm-batch-item dssm-group-candidate'},
+              h((primitives as any).Checkbox, {checked: selected.has(keyOf(c)), label: c.label, disabled: saving, onChange: (checked: boolean) => setMembers(previous => checked ? [...previous, {root:c.root,name:c.name}] : previous.filter(m => keyOf(m) !== keyOf(c)))}),
+              h('span', {className: 'dssm-group-source',title:c.source}, c.source + (c.status !== 'available' ? ' · ' + t('loadout.' + c.status) : ''))))) : t('empty.search'))) : null,
+          !props.inline && !props.sessionId ? h('p', {className: 'dssm-help'}, t('loadout.noSession')) : null,
+          error || props.readError ? h('div', {className: 'dssm-feedback dssm-error', role: 'alert'}, error || props.readError) : null,
+          props.readError && props.onRetry ? hostButton(t('btn.refresh'), props.onRetry, 'outline', props.loading || saving) : null),
+        h('div', {className: 'dssm-modal-actions'}, hostButton(t('btn.cancel'), close, 'outline', saving),
+          hostButton(t('loadout.save'), () => { void save(false); }, draft.mode === 'create' && props.sessionId ? 'outline' : 'primary', saving || props.loading || !!props.readError || !name.trim()),
+          draft.mode === 'create' && props.sessionId ? hostButton(t('loadout.createUse'), () => { void save(true); }, 'primary', saving || props.loading || !!props.readError || !name.trim()) : null));
+    }
     function SkillManagerSection(props: Partial<SectionProps>) {
       var t = resolveT(props && props.t);
-      var sessionId = props && props.useSessions ? props.useSessions(currentSessionId) : undefined;
-      var scopes = react.useState("user"), filtersState = react.useState<Record<string, Filters>>({}), expandedState = react.useState<Record<string, boolean>>({});
+      // Only the explicit composer modal is session-scoped; settings/sidebar never borrow the open chat.
+      var sessionId = props.onClose && props.useSessions ? props.useSessions(currentSessionId) : undefined;
+      var scopes = react.useState(props.entry?.mode === "library" ? "user" : "loadouts"), filtersState = react.useState<Record<string, Filters>>({}), expandedState = react.useState<Record<string, boolean>>({});
       // 按会话重挂载请求和表单状态，旧会话的异步响应不能覆盖新会话页面。
       return h(SkillManagerView, Object.assign({}, props, { t: t, key: sessionId || "no-session", sessionId: sessionId, scope: scopes[0], setScope: scopes[1], savedFilters: filtersState[0], setSavedFilters: filtersState[1], expanded: expandedState[0], setExpanded: expandedState[1] }));
     }
@@ -623,15 +768,21 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
       var rpe = react.useState<string | null>(null), rootPathError = rpe[0], setRootPathError = rpe[1];
       // loadout 编组页签：列表按当前作用域读取 active 标记，成员启用状态复用 /state 快照。
       var los = react.useState<{loading: boolean; error: string | null; data: ApiRoutes["/loadouts"] | null}>({ loading: false, error: null, data: null }), loadoutState = los[0], setLoadoutState = los[1];
-      var lns = react.useState(""), loadoutName = lns[0], setLoadoutName = lns[1];
-      var lnts = react.useState(""), loadoutNoteText = lnts[0], setLoadoutNoteText = lnts[1];
-      var lsel = react.useState<Record<string, boolean>>({}), loadoutSelection = lsel[0], setLoadoutSelection = lsel[1];
-      var lex = react.useState<Record<string, boolean>>({}), loadoutExclusive = lex[0], setLoadoutExclusive = lex[1];
+      const [groupDraft, setGroupDraft] = react.useState<GroupDraft | null>(props.entry?.mode === 'create' ? {mode:'create'} : props.entry?.mode === 'edit' ? {mode:'edit',loadout:props.entry.loadout} : null);
+      const loadoutRequest = react.useRef(0);
+      const [defaultIds, setDefaultIds] = react.useState<string[]>([]);
+      const [defaultsReady, setDefaultsReady] = react.useState(false);
+      const [selectionSaving, setSelectionSaving] = react.useState(false);
+      const selectionMutation = react.useRef(false);
+      function loadDefaults() { return callApi('/default-loadouts').then(data=>{if (!Array.isArray(data.loadoutIds)) throw new Error('Invalid default group response');setDefaultIds(data.loadoutIds);setDefaultsReady(true);}); }
       function loadLoadouts(silent?: boolean) {
+        const request = ++loadoutRequest.current;
         setLoadoutState(function (previous) { return { loading: silent !== true, error: null, data: previous ? previous.data : null }; });
         return sessionApi("/loadouts").then(function (data) {
-          setLoadoutState({ loading: false, error: null, data: data && Array.isArray(data.loadouts) ? data : { scope: "user", loadouts: [], active: null } });
+          if (request !== loadoutRequest.current) return;
+          setLoadoutState({ loading: false, error: null, data: data && Array.isArray(data.loadouts) ? data : { scope: "user", loadouts: [], active: null, activeIds: [] } });
         }).catch(function (error) {
+          if (request !== loadoutRequest.current) return;
           setLoadoutState(function (previous) { return { loading: false, error: translateError(t, error), data: previous ? previous.data : null }; });
         });
       }
@@ -659,37 +810,27 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
       var workspaceRequests = react.useRef<Record<string, number>>({});
       var workspaceEpoch = react.useRef(0);
       react.useEffect(function () { return function () { workspaceEpoch.current++; }; }, []);
-      function refresh(silent: boolean) { if (!silent) setSnapshot({ loading: true, error: null, data: snapshot.data }); return sessionApi("/state").then(function (data) { setSnapshot({ loading: false, error: null, data: data }); return data; }).catch(function (error) { setSnapshot({ loading: false, error: translateError(t, error), data: snapshot.data }); }); }
-      react.useEffect(function () { refresh(false); }, []);
-      function post<K extends keyof ApiRoutes>(path: K, body: unknown, successKey?: string | null, successParams?: object): Promise<ApiRoutes[K]> { if (inflightRef.current) return Promise.reject({ error: "operation already in progress" }); inflightRef.current = true; setBusy(true); setResult(null); return sessionApi(path, { method: "POST", headers: MUTATION_HEADERS, body: JSON.stringify(body || {}) }).then(function (data) { setResult({ ok: true, text: successKey ? t(successKey, successParams || data || {}) : t("result.updated") }); var scopedWorkspace = body && typeof (body as { workspace?: unknown }).workspace === "string" ? (body as { workspace: string }).workspace : ""; return Promise.all([refresh(true), scopedWorkspace ? loadWorkspaceDetail(scopedWorkspace) : null]).then(function () { return data; }); }).catch(function (error) { setResult({ ok: false, text: t("error.action", { error: translateError(t, error) }) }); throw error; }).finally(function () { inflightRef.current = false; setBusy(false); }); }
-      // 单行开关：先本地翻状态（不置全局 busy、不整页重拉），失败再回滚。
-      function patchSkillEnabled(rootKey: string, skillName: string, next: boolean) {
-        setSnapshot(function (previous: any) {
-          if (!previous || !previous.data) return previous;
-          var data = previous.data;
-          var roots = (data.roots || []).map(function (root: any) {
-            if (root.key !== rootKey) return root;
-            return Object.assign({}, root, { skills: (root.skills || []).map(function (skill: any) {
-              return skill.name === skillName ? Object.assign({}, skill, { enabled: next }) : skill;
-            }) });
-          });
-          return Object.assign({}, previous, { data: Object.assign({}, data, { roots: roots }) });
-        });
+      const stateRequest = react.useRef(0);
+      const [scanStatus,setScanStatus] = react.useState<string|null>(null);
+      const scanGuard = react.useRef(false);
+      async function scanInventory(){
+        if(scanGuard.current)return;scanGuard.current=true;setScanStatus(t('library.scanning'));
+        try{const data=await refresh(true);if(data)setScanStatus(t('library.scanned',{count:scopeSkillRoots(data.roots||[]).reduce((n,r)=>n+(r.skills?.length||0),0)}));else setScanStatus(null);}
+        finally{scanGuard.current=false;}
       }
-      function toggleSkillQuiet(root: RootView, skill: SkillView, next: boolean, workspacePath?: string) {
-        var body = workspacePath ? { root: root.key, name: skill.name, workspace: workspacePath } : { root: root.key, name: skill.name };
-        var path: "/skill-reference" | "/enable" | "/disable" = gatekeeperOn
-          ? "/skill-reference"
-          : next ? "/enable" : "/disable";
-        if (gatekeeperOn) (body as any).referenced = next;
-        patchSkillEnabled(root.key, skill.name, next);
-        sessionApi(path, { method: "POST", headers: MUTATION_HEADERS, body: JSON.stringify(body) })
-          .then(function () { refresh(true); })
-          .catch(function (error: any) {
-            patchSkillEnabled(root.key, skill.name, !next);
-            setResult({ ok: false, text: t("error.action", { error: translateError(t, error) }) });
-          });
+      function refresh(silent: boolean) {
+        const request = ++stateRequest.current;
+        if (!silent) setSnapshot(previous => ({...previous, loading:true, error:null}));
+        return sessionApi('/state').then(data => { if (request === stateRequest.current) setSnapshot({loading:false,error:null,data}); return data; })
+          .catch(error => { if (request === stateRequest.current) setSnapshot(previous => ({...previous,loading:false,error:translateError(t,error)})); });
       }
+      react.useEffect(function () {
+        refresh(false); loadLoadouts(); if (!props.sessionId) void loadDefaults().catch(error=>setResult({ok:false,text:translateError(t,error)}));
+        const changed = () => { if (selectionMutation.current) return; refresh(true); loadLoadouts(true); if (!props.sessionId) void loadDefaults().catch(error=>setResult({ok:false,text:translateError(t,error)})); };
+        window.addEventListener?.(LOADOUT_CHANGED, changed);
+        return () => { stateRequest.current++; loadoutRequest.current++; window.removeEventListener?.(LOADOUT_CHANGED, changed); };
+      }, []);
+      function post<K extends keyof ApiRoutes>(path: K, body: unknown, successKey?: string | null, successParams?: object): Promise<ApiRoutes[K]> { if (inflightRef.current) return Promise.reject({ error: "operation already in progress" }); inflightRef.current = true; setBusy(true); setResult(null); return sessionApi(path, { method: "POST", headers: MUTATION_HEADERS, body: JSON.stringify(body || {}) }).then(function (data) { notifyLoadoutChanged(); setResult({ ok: true, text: successKey ? t(successKey, successParams || data || {}) : t("result.updated") }); var scopedWorkspace = body && typeof (body as { workspace?: unknown }).workspace === "string" ? (body as { workspace: string }).workspace : ""; return Promise.all([refresh(true), scopedWorkspace ? loadWorkspaceDetail(scopedWorkspace) : null]).then(function () { return data; }); }).catch(function (error) { setResult({ ok: false, text: t("error.action", { error: translateError(t, error) }) }); throw error; }).finally(function () { inflightRef.current = false; setBusy(false); }); }
       function openDetail(root: RootView, skill: SkillView, workspacePath?: string) { setBusy(true); setDetail(null); setCopyState("idle"); setModal("detail"); sessionApi("/detail", { method: "POST", headers: MUTATION_HEADERS, body: JSON.stringify(workspacePath ? { root: root.key, name: skill.name, workspace: workspacePath } : { root: root.key, name: skill.name }) }).then(setDetail).catch(function (error) { setResult({ ok: false, text: t("error.action", { error: translateError(t, error) }) }); setModal(null); }).finally(function () { setBusy(false); }); }
       function openRootPath(root: RootView) {
         setRootPathValue(root.path || "");
@@ -793,32 +934,41 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
       function submitCreate() { if (!destinationReady(createDestination, workspaceRows, userDestinations)) return; post("/create", Object.assign({}, form, { root: undefined }, destinationPayload(createDestination)), null).then(function (data) { setModal(null); setForm({ root: "dsh", name: "", description: "", body: "" }); setResult({ ok: true, text: t("result.created", { name: data.name }) + (createDestination.scope === "workspace" ? " · " + t("dest.createdInWorkspace") : "") }); }).catch(function () {}); }
       function selectUploadFiles(files: ArrayLike<UploadFile> | null) { pickerOpenRef.current = false; var selected = inspectUploadSelection(files); if (!selected) return; if (selected.error) { setUpload(null); setResult({ ok: false, text: translateError(t, selected.error) }); return; } setUpload(selected); setResult(null); }
       function openNativePicker(ref: React.RefObject<HTMLInputElement>) { if (busy || pickerOpenRef.current || !ref.current) return; pickerOpenRef.current = true; ref.current.value = ""; function release() { setTimeout(function () { pickerOpenRef.current = false; }, 0); } window.addEventListener("focus", release, { once: true }); ref.current.click(); setTimeout(function () { pickerOpenRef.current = false; }, 30000); }
-      function submitImport() { if (!upload || !destinationReady(importDestination, workspaceRows, userDestinations)) return; buildUploadPayload(upload).then(function (payload) { return post("/upload", Object.assign({}, payload, destinationPayload(importDestination)), null); }).then(function (data) { var summary = summarizeImportResult(t, data); setResult({ ok: summary.ok, warning: summary.warning, text: summary.text }); if (summary.imported) { setModal(null); setUpload(null); } }).catch(function () {}); }
+      function submitImport() { if (!upload || !destinationReady(importDestination, workspaceRows, userDestinations)) return; buildUploadPayload(upload).then(function (payload) { return post("/upload", Object.assign({}, payload, destinationPayload(importDestination)), null); }).then(function (data) { var summary = summarizeImportResult(t, data); setResult({ ok: summary.ok, warning: summary.warning, text: summary.text }); if (summary.imported) { setModal(null); setUpload(null); setScope("user"); } }).catch(function () {}); }
       var data = snapshot.data || { roots: [], writeDestinations: [], projects: [], trash: [], warnings: [], gatekeeper: false }, allRoots = data.roots || [];
       // 守门人开关由 /state 显式下发；缺省（旧服务端）按关闭处理，回到 v1 逐字节行为。
-      var gatekeeperOn = data.gatekeeper === true;
-      var overridableRoots = allRoots.filter(function (r) { return !r.mutable && r.scope !== "project"; });
+
+      var overridableRoots = allRoots.filter(function (r) { return !r.mutable && r.scope !== "project" && r.key !== 'codexSystem'; });
       function openRootPathPicker() {
         if (!overridableRoots.length) return;
         var target = (activeSource && overridableRoots.find(function (r) { return r.key === activeSource; })) || overridableRoots[0];
         openRootPath(target);
       }
-      var filterKey = scope === "project" ? "project" : "user", filters = savedFilters[filterKey] || { query: "", source: "", status: "" }, query = filters.query, source = filters.source;
+      var filterKey = "local", filters = savedFilters[filterKey] || { query: "", source: "", status: "" }, query = filters.query, source = filters.source;
       function updateFilter(key: string, value: string) { setSavedFilters(function (previous) { return Object.assign({}, previous, { [filterKey]: Object.assign({}, filters, { [key]: value }) }); }); }
       function setQuery(value: string) { updateFilter("query", value); }
       function setSource(value: string) { updateFilter("source", value); }
-      var selectedDetail = workspaceDetails[selectedWorkspace];
-      var roots = scope === "trash" ? [] : scope === "project" ? visibleSkillRoots(selectedDetail?.roots || []) : scopeSkillRoots(allRoots);
+      const sessionProjectRoot = allRoots.find(root => root.scope === 'project')?.projectRoot;
+      const sessionProjectRef = react.useRef(sessionProjectRoot);
+      sessionProjectRef.current = sessionProjectRoot;
+      const workspaceChosen = react.useRef(false);
+      const browsingCurrentProject = !!sessionProjectRoot && !workspaceChosen.current;
+      var selectedDetail = browsingCurrentProject ? undefined : workspaceDetails[selectedWorkspace];
+      const globalRoots = scopeSkillRoots(allRoots);
+      const projectRoots = visibleSkillRoots(browsingCurrentProject ? allRoots.filter(root => root.scope === 'project') : selectedDetail?.roots || allRoots.filter(root => root.scope === 'project'));
+      var roots = globalRoots; // Library inventory and group candidates are global-only.
       var filteredOptionsRoots = roots.filter(function (r) { return (r.skills || []).length > 0; });
-      var activeSource = scope !== "project" && filteredOptionsRoots.some(function (root) { return root.key === source; }) ? source : "";
+      var activeSource = filteredOptionsRoots.some(function (root) { return root.key === source; }) ? source : "";
       function workspacePath(row: ApiRoutes["/workspaces"]["items"][number]) { return row.registeredPaths[0] || ""; }
       function selectWorkspace(path: string) {
+        if (path === '__current__' && sessionProjectRoot) {workspaceChosen.current = false; selectedWorkspaceRef.current = ''; setSelectedWorkspace(''); return;}
         if (!workspaceRows.some(function (row) { return row.available && workspacePath(row) === path; })) return;
+        workspaceChosen.current = true;
         selectedWorkspaceRef.current = path;
         setSelectedWorkspace(path);
         if (!workspaceDetails[path]) loadWorkspaceDetail(path);
       }
-      function loadWorkspaces(readSelected = scope === "project", forceDetail = false) {
+      function loadWorkspaces(readSelected = scope === "project" || scope === "user", forceDetail = false) {
         var epoch = workspaceEpoch.current, request = ++workspaceListRequest.current;
         var current = function () { return epoch === workspaceEpoch.current && request === workspaceListRequest.current; };
         setWorkspaceList({ loading: true, error: null });
@@ -827,8 +977,8 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
           var items = listed.items || [];
           setWorkspaceRows(items);
           setWorkspaceList({ loading: false, error: null });
-          var selected = items.find(function (row) { return row.available && workspacePath(row) === selectedWorkspaceRef.current; }) || items.find(function (row) { return row.available && workspacePath(row); });
-          var path = selected ? workspacePath(selected) : "";
+          var selected = items.find(function (row) { return row.available && workspacePath(row) === selectedWorkspaceRef.current; }) || items.find(row => row.available && row.projectRoot === sessionProjectRef.current) || items.find(function (row) { return row.available && workspacePath(row); });
+          var path = sessionProjectRef.current && !workspaceChosen.current ? '' : selected ? workspacePath(selected) : "";
           selectedWorkspaceRef.current = path;
           setSelectedWorkspace(path);
           if (readSelected && path && (forceDetail || !workspaceDetails[path])) loadWorkspaceDetail(path);
@@ -842,6 +992,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
           return [];
         });
       }
+      // Project inventory is owned by the composer; library never enumerates workspaces.
       // 只读所选登记路径：详情按路径缓存，操作完成后只重新读取原工作区。
       function loadWorkspaceDetail(path: string) {
         var epoch = workspaceEpoch.current, request = (workspaceRequests.current[path] || 0) + 1;
@@ -851,12 +1002,11 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
         return callApi("/workspace-skills", { method: "POST", headers: MUTATION_HEADERS, body: JSON.stringify({ workspace: path }) }).then(function (detail) { if (current()) setWorkspaceDetails(function (previous) { return Object.assign({}, previous, { [path]: { loading: false, error: null, roots: detail.roots || [] } }); }); }).catch(function (error) { if (current()) setWorkspaceDetails(function (previous) { return Object.assign({}, previous, { [path]: { loading: false, error: translateError(t, error), roots: [] } }); }); });
       }
       function refreshWorkspaceDetails() {
-        workspaceEpoch.current++;
-        setWorkspaceDetails({});
-        return loadWorkspaces(true, true);
+        // No project enumeration from the global library.
+        return Promise.resolve();
       }
       function openCreate() { setForm(Object.assign({}, form, { root: "dsh" })); setCreateDestination(defaultDestination()); setModal("create"); loadWorkspaces(); }
-      function openImport() { setResult(null); setUpload(null); setImportDestination(defaultDestination()); setModal("import"); loadWorkspaces(); }
+      function openImport() { setResult(null); setUpload(null); setImportDestination({...defaultDestination(),scope:'user',workspace:''}); setModal("import"); }
       var userDestinations = (data.writeDestinations || []).filter(function (item) { return item.key === "dsh" || item.key === "agents"; });
       // 项目条目用原项目的登记路径恢复：不依赖当前会话。找不到登记路径时不编造，交给服务端按会话判断。
       function trashRestoreBody(item: TrashItem) {
@@ -912,8 +1062,8 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
         var scoped = function (extra: Record<string, unknown>) { return workspacePath ? Object.assign({}, extra, { workspace: workspacePath }) : extra; };
         var enabled = isSkillEnabled(skill);
         var gated = skill.gated === true;
-        var showSwitch = root.toggleable !== false;
-        var statusKey = skill.shadowedBy ? "status.shadowed" : skill.loadable === false ? "status.invalid" : enabled ? "status.enabled" : gated ? "status.unloaded" : "status.disabled";
+        var showSwitch = false;
+        var statusKey = 'status.' + skillStatus(skill);
         var cls = skill.shadowedBy ? "dssm-shadowed" : enabled ? "dssm-enabled" : "dssm-disabled";
         var showStatus = !showSwitch || !!skill.shadowedBy || skill.loadable === false || gated;
         var menu: { value: string; label: string; danger?: boolean }[] = [{ value: "detail", label: t("btn.detail") }];
@@ -929,7 +1079,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
         }
         if (skill.installSource && skill.linked !== true) menu.push({ value: "update", label: t("repo.manageUpdate") });
         menu.push({ value: "note", label: t("skill.editNote") });
-        if (root.mutable && skill.linked !== true) menu.push({ value: "trash", label: t("btn.trash"), danger: true });
+        // Removal/recovery is not part of the library UI; source files remain untouched.
         var statusTitle = skill.shadowedBy ? t("status.shadowedBy", { source: (function () { var winner = allRoots.find(function (item) { return item.key === skill.shadowedBy!.root; }); return winner ? rootDisplayName(t, winner) : skill.shadowedBy!.root; })() }) : undefined;
         var skillActions: React.ReactNode[] = [
           h(SourceSelect, { action: true, icon: moreIcon(), label: t("btn.more"), disabled: busy, options: menu, onChange: function (action) {
@@ -944,7 +1094,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
           if (action === "trash") setModal({ type: "trash-confirm", root: root.key, name: skill.name, workspace: workspacePath });
         } }),
         ];
-        skillActions.push(h("div", { className: "dssm-row-state" }, showStatus ? renderSkillStatusIcon(statusKey, statusTitle, cls) : null, showSwitch ? enableSwitch(enabled, (gatekeeperOn ? t("skill.referenceToggle") : t("skill.toggle")) + " " + skill.name, root.enabled === false || (!enabled && skill.loadable === false), function () { toggleSkillQuiet(root, skill, !enabled, workspacePath); }) : null));
+        skillActions.push(h("div", { className: "dssm-row-state" }, showStatus ? renderSkillStatusIcon(statusKey, statusTitle, cls) : null));
         var skillName = skill.declaredName || skill.name;
         var hasCustomNote = typeof skill.customNote === "string" && skill.customNote.trim().length > 0;
         var description = hasCustomNote ? skill.customNote : (skill.description || t("note.missing"));
@@ -1003,8 +1153,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
         var actions: React.ReactNode[] = [];
         actions.push(iconButton(t("category.create"), uiIcon("plus"), function () { setCategoryName(""); setModal({ type: "category-create", root: root.key, workspace: workspacePath }); }, false, busy));
         // 外部只读来源可以改读取位置；DSH / 公共 Agent 由宿主配置，不在这里开放。
-        if (!workspacePath && root.mutable !== true) actions.push(iconButton(t("rootPath.edit"), uiIcon("folder"), function () { openRootPath(root); }, false, busy));
-        if (canToggleSource(root)) actions.push(h(SkillSwitch, { on: root.enabled, disabled: busy, label: t("source.toggle") + " " + displayName, onClick: function () { post(root.enabled ? "/source-disable" : "/source-enable", scoped); } }));
+        if (!workspacePath && root.mutable !== true && root.key !== 'codexSystem') actions.push(iconButton(t("rootPath.edit"), uiIcon("folder"), function () { openRootPath(root); }, false, busy));
         return h("span", { className: "dssm-source-actions", onClick: function (event: React.MouseEvent) { event.stopPropagation(); } }, actions);
       }
       function AntdFolderClosed() {
@@ -1087,9 +1236,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
               }, false, busy),
               bucket.locked ? null : iconButton(t("category.rename"), uiIcon("pencil"), function () { setCategoryName(bucket.name); setModal({ type: "category-rename", root: root.key, id: bucket.id, name: bucket.name, workspace: workspacePath }); }, false, busy),
               bucket.locked ? null : iconButton(t("category.delete"), uiIcon("trash"), function () { setModal({ type: "category-delete", root: root.key, id: bucket.id, name: bucket.name, workspace: workspacePath }); }, true, busy),
-              enableSwitch(allOn, t("category.toggle") + " " + bucket.name, busy || root.enabled === false || usable.length === 0, function () {
-                post(allOn ? "/category-disable" : "/category-enable", scoped({ root: root.key, category: bucket.id }));
-              }))),
+              null)),
           open ? (bucket.skills.length ? h("div", { className: "dssm-skill-list" }, bucket.skills.map(function (row) { return renderSkill(root, row.skill, workspacePath); })) : h("div", { className: "dssm-empty" }, t("category.empty"))) : null);
       }
       function renderSourceBody(root: RootView, filtered: { root: RootView; skill: SkillView }[], workspacePath?: string, keyPrefix?: string, scopeRows?: { root: RootView; skill: SkillView }[]) {
@@ -1132,17 +1279,20 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
           open ? h("div", { className: "dssm-source-body", role: "region" }, renderSourceBody(root, filtered, workspacePath, keyPrefix, scopeRows)) : null);
       }
       function renderList() {
-        var project = scope === "project", path = project ? selectedWorkspace : undefined;
-        var groups = roots.map(function (root) { return renderRoot(root, path, undefined, path ? path + "|" : undefined); }).filter(Boolean);
-        var body: React.ReactNode = groups.length ? groups : h("div", { className: "dssm-empty" }, query || filters.status ? t("empty.search") : t("empty.source"));
-        if (project) {
-          if (workspaceList.error) body = h("div", { className: "dssm-feedback dssm-error", role: "alert" }, t("workspace.listFailed", { error: workspaceList.error }));
-          else if (workspaceList.loading || selectedWorkspace && (!selectedDetail || selectedDetail.loading)) body = h("div", { className: "dssm-empty" }, t("workspace.loading"));
-          else if (!selectedWorkspace) body = h("div", { className: "dssm-empty" }, t(workspaceRows.length ? "workspace.unavailable" : "project.empty"));
-          else if (selectedDetail?.error) body = h("div", { className: "dssm-feedback dssm-error", role: "alert" }, t("workspace.loadFailed", { error: selectedDetail.error }));
-          else if (!rows.length && !query && !filters.status) body = h("div", { className: "dssm-empty" }, t("workspace.noSkills"));
-        }
-        return h("div", { key: "sources", id: "dssm-scope-panel", role: "tabpanel", "aria-labelledby": "dssm-tab-" + scope, className: "dssm-sources" }, body);
+        const renderSection = (project: boolean) => {
+          const sectionRoots = project ? projectRoots : globalRoots;
+          const sectionRows = rows.filter(row => sectionRoots.some(root => root.key === row.root.key));
+          let body: React.ReactNode = sectionRoots.map(root => renderRoot(root,project && !browsingCurrentProject ? selectedWorkspace || undefined : undefined)).filter(Boolean);
+          if (!sectionRows.length || Array.isArray(body) && !body.length) body = h('div',{className:'dssm-empty'},t(query || filters.status || activeSource ? 'empty.search' : project ? 'workspace.noSkills' : 'empty.source'));
+          if (project && !browsingCurrentProject && workspaceList.error) body = h('div',{className:'dssm-feedback dssm-error',role:'alert'},t('workspace.listFailed',{error:workspaceList.error}));
+          else if (project && !browsingCurrentProject && (workspaceList.loading || selectedDetail?.loading)) body = h('div',{className:'dssm-empty'},t('workspace.loading'));
+          else if (project && !selectedWorkspace && !projectRoots.length) body = h('div',{className:'dssm-empty'},t(workspaceRows.length ? 'workspace.unavailable' : 'project.empty'));
+          else if (project && selectedDetail?.error) body = h('div',{className:'dssm-feedback dssm-error',role:'alert'},t('workspace.loadFailed',{error:selectedDetail.error}));
+          return h('section',{key:project?'project':'global',className:'dssm-inventory-section','data-inventory-scope':project?'project':'global'},
+            h('div',{className:'dssm-inventory-heading'},h('h3',null,t(project?'scope.project':'scope.user')),h('span',{className:'dssm-count'},String(sectionRows.length)),
+              project && (workspaceRows.length || sessionProjectRoot) ? h(SourceSelect,{value:browsingCurrentProject ? '__current__' : selectedWorkspace,label:t('filter.workspace'),disabled:workspaceList.loading,options:[...(sessionProjectRoot ? [{value:'__current__',label:t('loadout.dock.source.session') + ' · ' + sessionProjectRoot,disabled:false}] : []),...workspaceRows.map(row=>({value:workspacePath(row),label:row.name + (!row.available?' · '+t('workspace.unavailable'):'') + ' · ' + workspacePath(row),disabled:!row.available || !workspacePath(row)}))],onChange:selectWorkspace}) : null),body);
+        };
+        return h('div',{id:'dssm-scope-panel',role:'tabpanel','aria-labelledby':'dssm-library-tab',className:'dssm-sources'}, globalRoots.map(root=>renderRoot(root)).filter(Boolean), !rows.length ? h('div',{className:'dssm-empty'},t('empty.source')) : null);
       }
       function renderTrash() {
         return h("div", { key: "trash", id: "dssm-scope-panel", role: "tabpanel", "aria-labelledby": "dssm-tab-trash", className: "dssm-trash-panel" },
@@ -1162,143 +1312,72 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
         var root = allRoots.find(function (item) { return item.key === rootKey; });
         return root ? (root.skills || []).find(function (item) { return item.name === name; }) || null : null;
       }
-      function loadoutMemberRows(loadout: Loadout) {
-        return loadout.members.map(function (member) {
-          var skill = findSkillView(member.root, member.name);
-          return { member: member, skill: skill, missing: !skill, enabled: skill ? isSkillEnabled(skill) : false };
-        });
-      }
-      function patchLoadoutMembers(loadoutId: string, next: boolean) {
-        setLoadoutState(function (previous: any) {
-          if (!previous || !previous.data) return previous;
-          var data = previous.data;
-          var loadouts = (data.loadouts || []).map(function (item: Loadout) {
-            if (item.id !== loadoutId) return item;
-            return Object.assign({}, item, { members: item.members.map(function (member) { return Object.assign({}, member, { __optimisticEnabled: next }); }) });
-          });
-          return Object.assign({}, previous, { data: Object.assign({}, data, { loadouts: loadouts }) });
-        });
-      }
-      function toggleLoadout(loadout: Loadout, enable: boolean) {
-        patchLoadoutMembers(loadout.id, enable);
-        post("/loadout-toggle", { id: loadout.id, enabled: enable }, null).then(function (data) {
-          setResult({ ok: true, text: t("loadout.toggled", { action: enable ? t("loadout.actionEnabled") : t("loadout.actionDisabled"), name: loadout.name, changed: data && typeof data.changed === "number" ? data.changed : 0, skipped: data && Array.isArray(data.skipped) ? data.skipped.length : 0 }) });
-          loadLoadouts(true);
-        }).catch(function () { loadLoadouts(true); });
-      }
-      function applyLoadoutNow(loadout: Loadout) {
-        post("/loadout-apply", { id: loadout.id, exclusive: loadoutExclusive[loadout.id] === true }, null).then(function (data) {
-          setResult({ ok: true, text: t("loadout.applied", { name: loadout.name, applied: data && typeof data.applied === "number" ? data.applied : 0, skipped: data && Array.isArray(data.skipped) ? data.skipped.length : 0, disabled: data && typeof data.disabledOthers === "number" ? data.disabledOthers : 0 }) });
-          loadLoadouts();
-        }).catch(function () {});
-      }
-      function renderLoadoutMembers(loadout: Loadout, memberRows: {member: LoadoutMember; skill: SkillView | null; missing: boolean; enabled: boolean}[]) {
-        var memberKeys: Record<string, boolean> = {};
-        loadout.members.forEach(function (member) { memberKeys[member.root + "\n" + member.name] = true; });
-        var candidates: { value: string; label: React.ReactNode }[] = [];
-        allRoots.forEach(function (root) {
-          (root.skills || []).forEach(function (skill) {
-            if (memberKeys[root.key + "\n" + skill.name]) return;
-            candidates.push({ value: root.key + "\n" + skill.name, label: rootDisplayName(t, root) + " / " + (skill.declaredName || skill.name) });
-          });
-        });
-        return h("div", { className: "dssm-loadout-members" },
-          memberRows.length ? memberRows.map(function (row) {
-            var root = allRoots.find(function (item) { return item.key === row.member.root; });
-            return h("div", { key: row.member.root + "/" + row.member.name, className: "dssm-skill-row" },
-              h("span", { className: "dssm-name" }, row.skill ? row.skill.declaredName || row.skill.name : row.member.name),
-              row.missing ? h("span", { className: "dssm-loadout-tag dssm-loadout-tag-missing" }, t("loadout.missingTag")) : null,
-              h("span", { className: "dssm-note" }, root ? rootDisplayName(t, root) : row.member.root),
-              iconButton(t("loadout.removeMember"), uiIcon("close"), function () {
-                post("/loadout-remove", { id: loadout.id, root: row.member.root, name: row.member.name }, "loadout.memberRemoved", { name: row.member.name }).then(function () { loadLoadouts(); }).catch(function () {});
-              }, false, busy));
-          }) : h("div", { className: "dssm-empty" }, t("loadout.emptyMembers")),
-          h("div", { className: "dssm-loadout-add" },
-            h(SourceSelect, { value: "", label: t("loadout.addMember"), disabled: busy || !candidates.length, options: candidates, onChange: function (value) {
-              var parts = String(value).split("\n");
-              if (parts.length !== 2 || !parts[0] || !parts[1]) return;
-              post("/loadout-add", { id: loadout.id, root: parts[0], name: parts[1] }, "loadout.memberAdded", { name: parts[1] }).then(function () { loadLoadouts(); }).catch(function () {});
-            } })));
-      }
-      function renderLoadout(loadout: Loadout, isActive: boolean, loadoutGatekeeper: boolean) {
-        var expansionKey = "loadout:" + loadout.id;
-        var open = expanded[expansionKey] === true;
-        var memberRows = loadoutMemberRows(loadout);
-        var missingCount = memberRows.filter(function (row) { return row.missing; }).length;
-        var usable = memberRows.filter(function (row) { return !row.missing; });
-        var allOn = usable.length > 0 && usable.every(function (row) { return row.enabled; });
-        var exclusive = loadoutExclusive[loadout.id] === true;
-        return h("section", { key: loadout.id, className: "dssm-cat", "aria-label": loadout.name },
-          h("div", { className: "dssm-cat-head" },
-            h("button", { type: "button", className: "dssm-cat-main", "aria-expanded": open, onClick: function () { setExpanded(function (previous) { var next: Record<string, boolean> = {}; next[expansionKey] = !open; return Object.assign({}, previous, next); }); } },
-              foldChevron(h, open),
-              h("span", { className: "dssm-cat-title" }, loadout.name),
-              isActive ? h("span", { className: "dssm-loadout-tag" }, t("loadout.active")) : null,
-              h("span", { className: "dssm-count" }, t(countKey("loadout.members", loadout.members.length), { count: loadout.members.length }) + (missingCount ? " · " + t(countKey("loadout.missing", missingCount), { count: missingCount }) : ""))),
-            h("span", { className: "dssm-source-actions" },
-              loadoutGatekeeper ? null : h("label", { className: "dssm-loadout-exclusive", title: t("loadout.exclusiveTip") },
-                h("input", { type: "checkbox", checked: exclusive, disabled: busy, onChange: function () { setLoadoutExclusive(function (previous) { var next: Record<string, boolean> = {}; next[loadout.id] = !exclusive; return Object.assign({}, previous, next); }); } }),
-                t("loadout.exclusive")),
-              hostButton(loadoutGatekeeper ? t("loadout.setActive") : t("loadout.apply"), function () { applyLoadoutNow(loadout); }, "outline", busy || !usable.length),
-              h(SourceSelect, { action: true, icon: moreIcon(), label: t("btn.more"), disabled: busy, options: [
-                { value: "rename", label: t("loadout.rename") },
-                { value: "note", label: t("loadout.noteEdit") },
-                { value: "delete", label: t("loadout.delete"), danger: true },
-              ], onChange: function (action) {
-                if (action === "rename") { setLoadoutName(loadout.name); setModal({ type: "loadout-rename", id: loadout.id, name: loadout.name }); }
-                if (action === "note") { setLoadoutNoteText(loadout.note || ""); setModal({ type: "loadout-note", id: loadout.id, note: loadout.note || "" }); }
-                if (action === "delete") setModal({ type: "loadout-delete", id: loadout.id, name: loadout.name });
-              } }),
-              enableSwitch(allOn, t("loadout.toggle") + " " + loadout.name, busy || !usable.length, function () { toggleLoadout(loadout, !allOn); }))),
-          loadout.note ? h("p", { className: "dssm-cat-note" }, loadout.note) : null,
-          open ? renderLoadoutMembers(loadout, memberRows) : null);
+      function useGroup(id: string) {
+        if (selectionMutation.current) return;
+        selectionMutation.current = true; setSelectionSaving(true);
+        const previous = props.sessionId ? loadoutState.data?.activeIds || [] : defaultIds;
+        const next = id ? previous.includes(id) ? previous.filter(selected=>selected!==id) : [...previous,id] : [];
+        // Keep row nodes, page geometry and inventory intact while persisting selection.
+        const save = props.sessionId ? sessionApi('/session-loadout',{method:'POST',headers:MUTATION_HEADERS,body:JSON.stringify({sessionId:props.sessionId,loadoutIds:next})}) : callApi('/default-loadouts',{method:'POST',headers:MUTATION_HEADERS,body:JSON.stringify({loadoutIds:next})});
+        save.then(()=>{
+          if (props.sessionId) setLoadoutState(previous=>({...previous,data:previous.data ? {...previous.data,activeIds:next,active:next.length===1 ? next[0] : null} : null}));
+          else setDefaultIds(next);
+          // Selection needs no library re-scan or success banner. Other surfaces refresh silently.
+          notifyLoadoutChanged();
+        }).catch(error=>setResult({ok:false,text:translateError(t,error)})).finally(()=>{selectionMutation.current=false;setSelectionSaving(false);});
       }
       function renderLoadouts() {
-        var loadouts = loadoutState.data && Array.isArray(loadoutState.data.loadouts) ? loadoutState.data.loadouts : [];
-        var active = loadoutState.data ? loadoutState.data.active : null;
-        // 编组页签的守门人状态以 /loadouts 应答为准（页签打开时重新拉取），快照缺省按关闭。
-        var loadoutGatekeeper = loadoutState.data ? loadoutState.data.gatekeeper === true : gatekeeperOn;
-        var body: React.ReactNode;
-        if (loadoutState.error) body = h("div", { className: "dssm-feedback dssm-error", role: "alert" }, loadoutState.error);
-        else if (loadoutState.loading && !loadoutState.data) body = h("div", { className: "dssm-empty" }, t("loading"));
-        else if (!loadouts.length) body = h("div", { className: "dssm-empty" }, t("loadout.empty"));
-        else body = loadouts.map(function (loadout) { return renderLoadout(loadout, active === loadout.id, loadoutGatekeeper); });
-        return h("div", { key: "loadouts", id: "dssm-scope-panel", role: "tabpanel", "aria-labelledby": "dssm-tab-loadouts", className: "dssm-loadouts" },
-          h("div", { className: "dssm-loadout-toolbar" },
-            h("p", { className: "dssm-loadout-hint" }, t("loadout.hint")),
-            hostButton(t("loadout.create"), function () { setLoadoutName(""); setLoadoutNoteText(""); setLoadoutSelection({}); setAddSearch(""); setModal({ type: "loadout-create" }); }, "outline", busy)),
-          loadoutGatekeeper && !active && !loadoutState.error && !(loadoutState.loading && !loadoutState.data) ? h("div", { className: "dssm-feedback", role: "status" }, t("loadout.gatekeeperGuide")) : null,
-          body);
+        const listed = loadoutState.data;
+        const selected = props.sessionId ? listed?.activeIds || [] : defaultIds;
+        return h('div', {className:'dssm-loadouts'},
+          h('div', {className:'dssm-loadout-toolbar'}, h('span', {className:'dssm-loadout-hint'}, t('loadout.clickHint')), h('div',{className:'dssm-group-actions'},
+            hostButton(t('loadout.create'), () => setGroupDraft({mode:'create'}), 'primary', busy))),
+          h('div',{className:'dssm-group-columns'},h('span',null,t('loadout.tab')),h('span',{title:t('loadout.defaultsHint')},t(props.sessionId ? 'loadout.sessionColumn' : 'loadout.defaultColumn')),h('span',{'aria-hidden':true})),
+          listed?.migration?.hasLegacyPolicy ? h('p', {className:'dssm-help'}, t('loadout.legacy')) : null,
+          listed?.migration?.manualReferences.length ? hostButton(t('loadout.importLegacy'), () => setGroupDraft({mode:'legacy'}), 'outline', busy) : null,
+          loadoutState.error ? h('div', {className:'dssm-feedback dssm-error',role:'alert'}, loadoutState.error) : loadoutState.loading && !listed ? t('loading') : !listed?.loadouts.length ? h('p', {className:'dssm-empty'}, t('loadout.empty')) : listed.loadouts.map(loadout => h('section', {key:loadout.id,className:'dssm-group-row'},
+            h('div',{className:'dssm-group-main'},h('div', {className:'dssm-group-title'}, h('button', {type:'button',className:'dssm-group-name dssm-group-expand',title:loadout.name,'aria-expanded':groupDraft?.loadout?.id===loadout.id,'aria-controls':'group-'+loadout.id,onClick:()=>setGroupDraft(groupDraft?.loadout?.id===loadout.id ? null : {mode:'edit',loadout})},foldChevron(h,groupDraft?.loadout?.id===loadout.id),loadout.name), h('span', {className:'dssm-count'}, t(countKey('loadout.members',loadout.members.length),{count:loadout.members.length}))),
+            loadout.note ? h('p', {className:'dssm-cat-note'}, loadout.note) : null),
+            h('div', {className:'dssm-group-actions'}, h((primitives as any).Checkbox,{checked:selected.includes(loadout.id),label:h('span',{className:'dssm-sr-only'},loadout.name+' · '+t(props.sessionId ? 'loadout.sessionEnabled' : 'loadout.defaultEnabled')),'aria-label':loadout.name+' · '+t(props.sessionId ? 'loadout.sessionEnabled' : 'loadout.defaultEnabled'),disabled:busy || loadoutState.loading || (!props.sessionId && !defaultsReady),onChange:()=>useGroup(loadout.id)}),
+              h(SourceSelect, {action:true,icon:moreIcon(),label:t('btn.more'),disabled:busy,options:[{value:'duplicate',label:t('loadout.duplicate')},{value:'delete',label:t('loadout.delete'),danger:true}],onChange:action => {
+                if (action === 'duplicate') setGroupDraft({mode:'duplicate',loadout});
+                if (action === 'delete') setModal({type:'loadout-delete',id:loadout.id,name:loadout.name});
+              }})),
+            groupDraft?.loadout?.id===loadout.id ? h('div',{id:'group-'+loadout.id,className:'dssm-group-expanded'},renderInlineGroupEditor(groupDraft)) : null)),
+          groupDraft && !groupDraft.loadout ? renderInlineGroupEditor(groupDraft) : null);
       }
-      var repositoryUI = useRepositoryUI({ active: scope === "repositories", t: t, onInstalled: function () { return Promise.all([refresh(false), refreshWorkspaceDetails()]); } });
-      function getTabIcon(tabVal: string) {
-        var name = tabVal === "user" ? "globe" :
-                   tabVal === "project" ? "folder" :
-                   tabVal === "repositories" ? "compass" :
-                   tabVal === "loadouts" ? "layers" : "trash";
-        return uiIcon(name, 14);
-      }
-      var tabItems = ["user", "project", "loadouts", "repositories", "trash"].map(function (value) {
-        var text = value === "loadouts" ? t("loadout.tab") : t("scope." + value);
-        var count = value === "trash" ? (data.trash || []).length : 0;
-        var icon = getTabIcon(value);
-        return {
-          value: value,
-          id: "dssm-tab-" + value,
-          panelId: "dssm-scope-panel",
-          label: count > 0 ? [icon, text, h("span", { className: "dssm-trash-count" }, count)] : [icon, text]
-        };
-      });
-      var tabs = h(SegmentedTabs, { key: "tabs", className: "dssm-scope-tabs", label: t("scope.label"), value: scope, onChange: function (next: string) { setScope(next); if (next === "project" || next === "trash") loadWorkspaces(next === "project"); if (next === "trash") refresh(true); if (next === "loadouts") loadLoadouts(); }, items: tabItems });
-      var skillControls = [ scope === "project" ? null : h("div", { key: "summary", className: "dssm-summary" }, (gatekeeperOn ? [["total", "summary.total"], ["enabled", "summary.enabled"], ["unloaded", "summary.unloaded"], ["disabled", "summary.disabled"], ["invalid", "summary.invalid"]] : [["total", "summary.total"], ["enabled", "summary.enabled"], ["disabled", "summary.disabled"], ["invalid", "summary.invalid"]]).map(function (item) { return h("div", { key: item[1], className: "dssm-stat" }, h("strong", null, summary[item[0]]), t(countKey(item[1], summary[item[0]]), { count: summary[item[0]] }).replace(String(summary[item[0]]), "")); })), h("div", { key: "filters", className: "dssm-filters" }, scope === "project" ? null : h("div", { className: "dssm-source-filter" }, h(SourceSelect, { value: activeSource, label: t("filter.source"), options: options, onChange: setSource })), h("div", { className: "dssm-status-filter" }, h(SourceSelect, { value: filters.status, label: t("filter.status"), options: [{ value: "", label: t("filter.statusAll") }].concat((gatekeeperOn ? ["enabled", "unloaded", "disabled", "shadowed", "invalid"] : ["enabled", "disabled", "shadowed", "invalid"]).map(function (value) { return { value: value, label: t("status." + value) }; })), onChange: function (value) { updateFilter("status", value); } })), scope === "project" ? h("div", { className: "dssm-project-filter" }, h(SourceSelect, { value: selectedWorkspace, label: t("filter.workspace"), disabled: workspaceList.loading || !workspaceRows.length, options: workspaceRows.map(function (row) { return { value: workspacePath(row), label: row.name + (!row.available ? " · " + (row.errorCode === "ENOENT" || row.errorCode === "ENOTDIR" ? t("workspace.missing") : (row.errorCode === "EACCES" || row.errorCode === "EPERM" ? t("workspace.unreadable") : t("workspace.unavailable"))) : "") + (workspaceRows.filter(function (other) { return other.name === row.name; }).length > 1 ? " · " + workspacePath(row) : ""), disabled: !row.available || !workspacePath(row) }; }), onChange: selectWorkspace })) : null, h(Input, { className: "dssm-search", allowClear: true, value: query, "aria-label": t("search"), placeholder: t("search.placeholder"), onChange: function (e) { setQuery(e.target.value); } }),
-        scope !== "trash" ? h("div", { className: "dssm-filter-actions" },
-          filterActionButton(t("btn.refresh"), uiIcon("refresh"), function () { refresh(false); if (scope === "project") refreshWorkspaceDetails(); }, busy || snapshot.loading),
-          filterActionButton(t("btn.create"), uiIcon("plus"), openCreate, busy, t("btn.create") + "…"),
-          filterActionButton(t("import.global"), uiIcon("upload"), openImport, busy),
-          scope === "user" ? filterActionButton(t("rootPath.manage"), uiIcon("folder"), openRootPathPicker, busy, t("rootPath.manage") + "…") : null
-        ) : null)];
-      var content: React.ReactNode[] = ([h("style", { key: "css" }, CSS), h("div", { key: "head", className: "dssm-head" }, h("div", { className: "dssm-title-block" }, h("div", { className: "dssm-title-row" }, h("h2", { className: "dssm-title" }, t("title")), h("div", { className: "dssm-feedback-links" }, h(PrimitiveButton, { variant: "outline", size: "sm", "aria-label": t("link.project"), icon: h(GithubMark16), onClick: function () { window.open("https://github.com/vlln/skill-loadout", "_blank", "noreferrer"); } }, t("link.project")), h(PrimitiveButton, { variant: "outline", size: "sm", "aria-label": t("link.feedback"), icon: h(FeedbackIcon), onClick: function () { window.open("https://github.com/vlln/skill-loadout/issues", "_blank", "noreferrer"); } }, t("link.feedback")))), h("p", { className: "dssm-desc" }, t("desc")))), tabs] as React.ReactNode[]).concat(scope === "trash" || scope === "repositories" || scope === "loadouts" ? [] : skillControls, [result && modal !== "import" ? h("div", { key: "result", className: "dssm-feedback" + (result.warning ? " dssm-warning" : result.ok ? "" : " dssm-error") }, result.text) : null], (data.warnings || []).map(function (warning, index) { return h("div", { key: "warning-" + index, className: "dssm-feedback dssm-warning", role: "alert" }, translateError(t, warning)); }), [snapshot.error ? h("div", { key: "error", className: "dssm-feedback dssm-error" }, snapshot.error) : null, scope === "repositories" ? repositoryUI.content : snapshot.loading && !snapshot.data ? h("div", { key: "loading", className: "dssm-empty" }, t("loading")) : scope === "trash" ? renderTrash() : scope === "loadouts" ? renderLoadouts() : renderList()]);
+      function renderInlineGroupEditor(draft:GroupDraft) {return h(GroupEditor,{key:draft.mode+':'+(draft.loadout?.id||'new'),inline:true,t,draft,roots:globalRoots,loading:snapshot.loading,readError:snapshot.error,onRetry:()=>{void refresh(false);},onClose:()=>setGroupDraft(null),onSaved:()=>{void loadLoadouts(true);void refresh(true);}});}
+      const [installedNotice, setInstalledNotice] = react.useState(false);
+      const [addingSource, setAddingSource] = react.useState<'github'|'clawhub'|'skillsh'>('github');
+      const [addKind,setAddKind] = react.useState('git');
+      const [addAddress,setAddAddress] = react.useState('');
+      var repositoryUI = useRepositoryUI({ active: scope === "repositories", initialSource:'github', t: t, onInstalled: function () { setInstalledNotice(true); notifyLoadoutChanged(); return Promise.all([refresh(false), refreshWorkspaceDetails()]); } });
+      function openSkillSource(source: 'github' | 'clawhub' | 'skillsh') { setModal(null); setAddingSource(source); repositoryUI.openSource(source); setScope('repositories'); }
+      const tabs = h(react.Fragment, {key:'navigation'},
+        h(SegmentedTabs, {label:t('scope.label'), value:scope === 'loadouts' ? 'loadouts' : 'library', onChange: next => setScope(next === 'loadouts' ? 'loadouts' : 'user'), items:[{value:'loadouts',id:'dssm-groups-tab',panelId:'dssm-scope-panel',label:t('loadout.tab')},{value:'library',id:'dssm-library-tab',panelId:'dssm-scope-panel',label:t('library.tab')}]}),
+        scope !== 'loadouts' ? h('div',{className:'dssm-library-toolbar'},
+          scope === 'repositories' ? h('h3',{className:'dssm-flow-title',style:{margin:0,marginRight:'auto',font:'var(--dsw-font-s-strong-14)'}},t('library.add') + ' · ' + t('repo.subsource.' + addingSource)) : null,
+          scope === 'repositories' || scope === 'trash' ? hostButton(t('library.back'),()=>{setScope('user');refresh(false);},'outline',busy) : null,
+          scope !== 'repositories' && scope !== 'trash' ? hostButton(t('library.scan'),openRootPathPicker,'outline',busy) : null,
+          scope !== 'repositories' && scope !== 'trash' ? hostButton(t('library.sources'),()=>repositoryUI.openManage(),'outline',busy) : null,
+          scope !== 'repositories' && scope !== 'trash' ? hostButton(t('library.searchRemote'),()=>openSkillSource('github'),'outline',busy) : null,
+          scope !== 'repositories' && scope !== 'trash' ? hostButton(t('library.add'),()=>setModal('add-skills'),'primary',busy) : null) : null,
+        scope === 'repositories' && installedNotice ? h('p',{role:'status',className:'dssm-help'},t('library.installed')) : null);
+      var skillControls = [scanStatus ? h('div',{key:'scan-status',role:'status',className:'dssm-loadout-hint'},scanStatus) : null,h('div',{key:'filters',className:'dssm-filters'},
+        h('div',{className:'dssm-source-filter'},h(SourceSelect,{value:activeSource,label:t('filter.source'),options,onChange:setSource})),
+        h('div',{className:'dssm-status-filter'},h(SourceSelect,{value:filters.status,label:t('filter.status'),options:[{value:'',label:t('filter.statusAll')},...['enabled','unloaded','shadowed','invalid'].map(value=>({value,label:t('status.'+value)}))],onChange:value=>updateFilter('status',value)})),
+        h(Input,{className:'dssm-search',allowClear:true,value:query,'aria-label':t('search'),placeholder:t('search.placeholder'),onChange:e=>setQuery(e.target.value)}),
+        h('div',{className:'dssm-filter-actions'},
+          filterActionButton(t('btn.refresh'),uiIcon('refresh'),()=>{void scanInventory();},busy||snapshot.loading||scanGuard.current),
+          filterActionButton(t('rootPath.manage'),uiIcon('folder'),openRootPathPicker,busy,t('rootPath.manage')+'…')))];
+      var content: React.ReactNode[] = ([h("style", { key: "css" }, CSS), h("div", { key: "head", className: "dssm-head" }, h("div", { className: "dssm-title-block" }, h("div", { className: "dssm-title-row" }, h("h2", { className: "dssm-title" }, t("title")), h(SourceSelect,{action:true,label:t('help.menu'),options:[{value:'project',label:t('link.project')},{value:'feedback',label:t('link.feedback')}],onChange:value=>window.open(value === 'project' ? 'https://github.com/vlln/skill-loadout' : 'https://github.com/vlln/skill-loadout/issues','_blank','noreferrer')})), h("p", { className: "dssm-desc" }, t("desc")))), tabs] as React.ReactNode[]).concat(scope === "trash" || scope === "repositories" || scope === "loadouts" ? [] : skillControls, [result && modal !== "import" ? h("div", { key: "result", className: "dssm-feedback" + (result.warning ? " dssm-warning" : result.ok ? "" : " dssm-error") }, result.text) : null], (data.warnings || []).map(function (warning, index) { return h("div", { key: "warning-" + index, className: "dssm-feedback dssm-warning", role: "alert" }, translateError(t, warning)); }), [snapshot.error ? h("div", { key: "error", className: "dssm-feedback dssm-error" }, snapshot.error) : null, scope === "repositories" ? repositoryUI.content : snapshot.loading && !snapshot.data ? h("div", { key: "loading", className: "dssm-empty" }, t("loading")) : scope === "trash" ? renderTrash() : scope === "loadouts" ? renderLoadouts() : renderList()]);
 
+      if (props.onClose) content = content.filter(node => !(react.isValidElement(node) && node.key === 'head'));
+      if (modal === 'add-skills') content.push(h(Modal,{key:'add-skills',title:t('library.choose'),closeLabel:t('btn.close'),onClose:()=>setModal(null)},
+        h('div',{className:'dssm-filters'},
+          h(SourceSelect,{value:addKind,label:t('filter.source'),options:[{value:'git',label:t('repo.subsource.github')},{value:'local',label:t('library.import')}],onChange:setAddKind}),
+          addKind === 'git' ? h(Input,{value:addAddress,'aria-label':t('library.input'),placeholder:t('repo.urlPlaceholder'),onChange:e=>setAddAddress(e.target.value)}) : h('span',{className:'dssm-help'},t('upload.drop.copy'))),
+        h('div',{className:'dssm-modal-actions'},hostButton(t('btn.cancel'),()=>setModal(null),'outline'),hostButton(t('btn.confirm'),()=>{if(addKind==='local')openImport();else {if(inflightRef.current)return;inflightRef.current=true;setBusy(true);setResult(null);repositoryUI.addRepository(addAddress).then(added=>{if(added){setModal(null);setAddingSource('github');setScope('repositories');}}).catch(error=>setResult({ok:false,text:translateError(t,error)})).finally(()=>{inflightRef.current=false;setBusy(false);});}},'primary',busy || addKind==='git' && !addAddress.trim()))));
       if (modal === "create") content.push(h(Modal, { key: "create", title: t("create.title"), closeLabel: t("btn.close"), onClose: function () { setModal(null); } }, h("div", { className: "dssm-form" }, h(DestinationPicker, { t: t, value: createDestination, disabled: busy, allowAgents: true, workspaces: workspaceRows, userDestinations: userDestinations, onChange: function (next: Partial<DestinationValue>) { setCreateDestination(Object.assign({}, createDestination, next)); } }), [["name", "create.name", "create.name.placeholder"], ["description", "create.description", "create.description.placeholder"]].map(function (field) {        return h("label", { key: field[0], className: "dssm-field" }, h("span", { className: "dssm-label" }, t(field[1])), h(Input, { value: form[field[0]], placeholder: t(field[2]), onChange: function (e: React.ChangeEvent<HTMLInputElement>) { updateForm(field[0], e.target.value); } })); }), h("label", { className: "dssm-field" }, h("span", { className: "dssm-label" }, t("create.body")), h(Input.TextArea, { rows: 8, value: form.body, placeholder: t("create.body.placeholder"), onChange: function (e: React.ChangeEvent<HTMLTextAreaElement>) { updateForm("body", e.target.value); } })), h("p", { className: "dssm-help" }, t("create.chat.note"))), h("div", { className: "dssm-modal-actions" }, hostButton(t("btn.cancel"), function () { setModal(null); }, "outline"), hostButton(t("btn.create.now"), submitCreate, "primary", busy || !form.name.trim() || !form.description.trim() || !form.body.trim() || !destinationReady(createDestination, workspaceRows, userDestinations)))));
       if (modal === "import") content.push(h(Modal, { key: "import", className: "dssm-modal-import", title: t("import.title"), closeLabel: t("btn.close"), onClose: function () { pickerOpenRef.current = false; setUpload(null); setResult(null); setModal(null); } },
         h("input", { ref: importInputRef, className: "dssm-hidden-input", type: "file", accept: ".zip,.md", onChange: function (event) { selectUploadFiles(event.target.files); event.target.value = ""; } }),
@@ -1309,7 +1388,7 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
           h("div", { className: "dssm-upload-choices" }, h("button", { type: "button", className: "dssm-upload-link", disabled: busy, onClick: function (event: React.MouseEvent<HTMLButtonElement>) { event.stopPropagation(); openNativePicker(folderInputRef); } }, t("btn.folder.pick")), h("span", { className: "dssm-upload-divider" }, "/"), h("button", { type: "button", className: "dssm-upload-link", disabled: busy, onClick: function (event: React.MouseEvent<HTMLButtonElement>) { event.stopPropagation(); openNativePicker(importInputRef); } }, t("btn.file.pick")))
         ),
         upload ? h("div", { className: "dssm-file", title: upload.name }, h("span", { className: "dssm-file-kind", "aria-hidden": "true" }, upload.kind === "zip" ? "ZIP" : upload.kind === "folder" ? "DIR" : "MD"), h("span", { className: "dssm-file-name" }, upload.name), h("span", { className: "dssm-file-meta" }, t(countKey("upload.selected", upload.count), { count: upload.count, size: upload.size < 1024 ? upload.size + " B" : Math.ceil(upload.size / 1024) + " KB" })), h("button", { type: "button", className: "dssm-file-remove", "aria-label": t("upload.remove"), onClick: function () { setUpload(null); } }, "×")) : null,
-        h(DestinationPicker, { t: t, value: importDestination, disabled: busy, allowAgents: true, workspaces: workspaceRows, userDestinations: userDestinations, onChange: function (next: Partial<DestinationValue>) { setImportDestination(Object.assign({}, importDestination, next)); } }),
+        h(SourceSelect,{value:importDestination.location,label:t('dest.location'),options:userDestinations.map(item=>({value:item.key,label:rootDisplayName(t,item as unknown as RootView)})),onChange:location=>setImportDestination({...importDestination,scope:'user',workspace:'',location:location==='agents'?'agents':'dsh'})}),
         result ? h("div", { className: "dssm-feedback" + (result.warning ? " dssm-warning" : result.ok ? "" : " dssm-error"), role: "alert" }, result.text) : null,
         h("div", { className: "dssm-upload-requirements" }, h("div", { className: "dssm-label" }, t("upload.requirements")), h("ul", null, h("li", null, t("upload.requirement.skill")), h("li", null, t("upload.requirement.frontmatter")), h("li", null, t("upload.requirement.copy")))),
         h("div", { className: "dssm-modal-actions" }, hostButton(t("btn.cancel"), function () { pickerOpenRef.current = false; setUpload(null); setResult(null); setModal(null); }, "outline"), hostButton(busy ? t("upload.importing") : t("btn.import.now"), submitImport, "primary", busy || !upload || !destinationReady(importDestination, workspaceRows, userDestinations)))
@@ -1503,80 +1582,18 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
           )));
       }
       if (modal && typeof modal === "object" && modal.type === "category-delete") content.push(h(Modal, { key: "category-delete", title: t("confirm.category.title"), description: t("confirm.category.desc", { name: modal.name }), closeLabel: t("btn.close"), onClose: function () { setModal(null); }, footer: h(React.Fragment, null, hostButton(t("btn.cancel"), function () { setModal(null); }, "outline"), hostButton(t("category.delete"), function () { post("/category-delete", { root: (modal as Extract<ConfirmModal, {type: "category-delete"}>).root, id: (modal as Extract<ConfirmModal, {type: "category-delete"}>).id, workspace: (modal as Extract<ConfirmModal, {type: "category-delete"}>).workspace }, "category.deleted", { name: (modal as Extract<ConfirmModal, {type: "category-delete"}>).name }).then(function () { setModal(null); }).catch(function () {}); }, "danger", busy)) }));
-      if (modal && typeof modal === "object" && modal.type === "loadout-create") {
-        var enabledCandidates: {root: string; name: string; label: string; description?: string}[] = [];
-        allRoots.forEach(function (root) {
-          (root.skills || []).forEach(function (skill) {
-            if (isSkillEnabled(skill)) enabledCandidates.push({ root: root.key, name: skill.name, label: skill.declaredName || skill.name, description: skill.description || undefined });
-          });
-        });
-        var loadoutKw = addSearch.trim().toLowerCase();
-        var visibleCandidates = enabledCandidates.filter(function (item) { return !loadoutKw || item.label.toLowerCase().includes(loadoutKw) || item.name.toLowerCase().includes(loadoutKw) || (item.description || "").toLowerCase().includes(loadoutKw); });
-        var chosenLoadoutMembers = enabledCandidates.filter(function (item) { return loadoutSelection[item.root + "\n" + item.name]; });
-        var loadoutNameTrimmed = loadoutName.trim();
-        var submitLoadoutCreate = function () {
-          if (busy || !loadoutNameTrimmed) return;
-          post("/loadout-create", { name: loadoutNameTrimmed, note: loadoutNoteText.trim(), members: chosenLoadoutMembers.map(function (item) { return { root: item.root, name: item.name }; }) }, "loadout.created", { name: loadoutNameTrimmed })
-            .then(function () { setModal(null); loadLoadouts(); })
-            .catch(function () {});
-        };
-        content.push(h(Modal, { key: "loadout-create", title: t("loadout.create"), closeLabel: t("btn.close"), onClose: function () { setModal(null); } },
-          h("div", { className: "dssm-form" },
-            h("label", { className: "dssm-field" }, h("span", { className: "dssm-label" }, t("loadout.name")), h(Input, { value: loadoutName, maxLength: 24, "aria-label": t("loadout.name"), placeholder: t("loadout.name.placeholder"), onChange: function (event: React.ChangeEvent<HTMLInputElement>) { setLoadoutName(event.target.value); }, onPressEnter: submitLoadoutCreate })),
-            h("label", { className: "dssm-field" }, h("span", { className: "dssm-label" }, t("loadout.note")), h(Input, { value: loadoutNoteText, maxLength: 140, "aria-label": t("loadout.note"), placeholder: t("loadout.note.placeholder"), onChange: function (event: React.ChangeEvent<HTMLInputElement>) { setLoadoutNoteText(event.target.value); } })),
-            h("span", { className: "dssm-label" }, t("loadout.pickMembers")),
-            h(Input, { placeholder: t("search.placeholder"), value: addSearch, allowClear: true, "aria-label": t("search"), onChange: function (e: React.ChangeEvent<HTMLInputElement>) { setAddSearch(e.target.value); } }),
-            h("div", { className: "dssm-batch-list" },
-              visibleCandidates.length ? visibleCandidates.map(function (item) {
-                var key = item.root + "\n" + item.name;
-                var isChecked = !!loadoutSelection[key];
-                return h("div", { key: key, className: "dssm-batch-item" + (isChecked ? " selected" : ""), onClick: function () { var next = Object.assign({}, loadoutSelection); if (isChecked) delete next[key]; else next[key] = true; setLoadoutSelection(next); } },
-                  h("input", { type: "checkbox", checked: isChecked, readOnly: true }),
-                  h("div", { className: "dssm-batch-info" },
-                    h("div", { className: "dssm-batch-name-row" },
-                      h("span", { className: "dssm-batch-name" }, item.label),
-                      h("span", { className: "dssm-batch-cat-tag" }, rootDisplayName(t, allRoots.find(function (root) { return root.key === item.root; }) || ({ key: item.root, label: item.root } as SkillRoot)))),
-                    item.description ? h("div", { className: "dssm-batch-desc", title: item.description }, item.description) : null));
-              }) : h("div", { className: "dssm-empty" }, t("loadout.noEnabled"))),
-            h("p", { className: "dssm-help" }, t("loadout.hint"))),
-          h("div", { className: "dssm-modal-actions" },
-            hostButton(t("btn.cancel"), function () { setModal(null); }, "outline"),
-            hostButton(t("loadout.create") + (chosenLoadoutMembers.length ? " (" + chosenLoadoutMembers.length + ")" : ""), submitLoadoutCreate, "primary", busy || !loadoutNameTrimmed))));
-      }
-      if (modal && typeof modal === "object" && modal.type === "loadout-rename") {
-        var loadoutRenameModal = modal as Extract<ConfirmModal, {type: "loadout-rename"}>;
-        var renameTrimmed = loadoutName.trim();
-        var submitLoadoutRename = function () {
-          if (busy || !renameTrimmed) return;
-          post("/loadout-rename", { id: loadoutRenameModal.id, name: renameTrimmed }, "loadout.renamed")
-            .then(function () { setModal(null); loadLoadouts(); })
-            .catch(function () {});
-        };
-        content.push(h(Modal, { key: "loadout-rename", title: t("loadout.rename"), closeLabel: t("btn.close"), onClose: function () { setModal(null); } },
-          h("div", { className: "dssm-form" },
-            h("label", { className: "dssm-field" }, h("span", { className: "dssm-label" }, t("loadout.name")), h(Input, { value: loadoutName, maxLength: 24, "aria-label": t("loadout.name"), onChange: function (event: React.ChangeEvent<HTMLInputElement>) { setLoadoutName(event.target.value); }, onPressEnter: submitLoadoutRename }))),
-          h("div", { className: "dssm-modal-actions" },
-            hostButton(t("btn.cancel"), function () { setModal(null); }, "outline"),
-            hostButton(t("btn.confirm"), submitLoadoutRename, "primary", busy || !renameTrimmed))));
-      }
-      if (modal && typeof modal === "object" && modal.type === "loadout-note") {
-        var loadoutNoteModal = modal as Extract<ConfirmModal, {type: "loadout-note"}>;
-        var loadoutNoteTrimmed = loadoutNoteText.trim();
-        var submitLoadoutNote = function () {
-          if (busy) return;
-          post("/loadout-note", { id: loadoutNoteModal.id, note: loadoutNoteTrimmed }, "loadout.noteSaved")
-            .then(function () { setModal(null); loadLoadouts(); })
-            .catch(function () {});
-        };
-        content.push(h(Modal, { key: "loadout-note", title: t("loadout.noteEdit"), closeLabel: t("btn.close"), onClose: function () { setModal(null); } },
-          h("div", { className: "dssm-form" },
-            h("label", { className: "dssm-field" }, h("span", { className: "dssm-label" }, t("loadout.note")), h(Input, { value: loadoutNoteText, maxLength: 140, "aria-label": t("loadout.note"), placeholder: t("loadout.note.placeholder"), onChange: function (event: React.ChangeEvent<HTMLInputElement>) { setLoadoutNoteText(event.target.value); }, onPressEnter: submitLoadoutNote }))),
-          h("div", { className: "dssm-modal-actions" },
-            hostButton(t("btn.cancel"), function () { setModal(null); }, "outline"),
-            hostButton(t("btn.confirm"), submitLoadoutNote, "primary", busy || loadoutNoteTrimmed === (loadoutNoteModal.note || "")))));
-      }
+      if (groupDraft && props.onClose && (props.entry?.mode==='create'||props.entry?.mode==='edit')) return h(react.Fragment, null, h('style', null, CSS), h(GroupEditor, {key:'group-editor',t,sessionId:props.sessionId,draft:groupDraft,roots:globalRoots,loading:snapshot.loading,readError:snapshot.error,onRetry:() => {void refresh(false);},onClose:() => {setGroupDraft(null); if (props.entry?.mode === 'create' || props.entry?.mode === 'edit') props.onClose?.();},onSaved:() => {loadLoadouts(true); refresh(true);}}));
       if (modal && typeof modal === "object" && modal.type === "loadout-delete") content.push(h(Modal, { key: "loadout-delete", title: t("confirm.loadout.title"), description: t("confirm.loadout.desc", { name: modal.name }), closeLabel: t("btn.close"), onClose: function () { setModal(null); }, footer: h(React.Fragment, null, hostButton(t("btn.cancel"), function () { setModal(null); }, "outline"), hostButton(t("loadout.delete"), function () { post("/loadout-delete", { id: (modal as Extract<ConfirmModal, {type: "loadout-delete"}>).id }, "loadout.deleted", { name: (modal as Extract<ConfirmModal, {type: "loadout-delete"}>).name }).then(function () { setModal(null); loadLoadouts(); }).catch(function () {}); }, "danger", busy)) }));
-      return h("section", { className: "dssm-section" }, content);
+      // Exactly one portal at a time. Host Modal does not support competing nested focus traps.
+      const panel = h("section", { className: "dssm-section" }, content);
+      if (!props.onClose) return h(react.Fragment,null,panel,scope !== 'repositories' ? repositoryUI.activeDialog : null);
+      if (repositoryUI.activeDialog) return h(react.Fragment, null, h('style', null, CSS), repositoryUI.activeDialog);
+      if (modal) {
+         const activeModal = content.slice().reverse().find(node => react.isValidElement(node) && node.type === Modal) as React.ReactElement<ModalProps> | undefined;
+         const feedback = result && !result.ok ? h('div', {className:'dssm-feedback dssm-error',role:'alert'}, result.text) : null;
+         return h(react.Fragment, null, h('style', null, CSS), activeModal ? h(Modal, {...activeModal.props, key:activeModal.key}, activeModal.props.children, feedback) : null);
+       }
+      return h(Modal, {title:t('title'),closeLabel:t('btn.close'),className:'dssm-modal-manager',onClose:props.onClose}, panel);
     }
 
     /** 按会话生成 API 调用（自动带上会话头）。 */
@@ -1591,6 +1608,12 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
     // 与宿主「权限」下拉同构：同一个 Menu 原语 + 同一套 trigger 样式（值抄自
     // PermissionSelect.module.css，2026-11-02 对照安装包源码）。
     var CHIP_CSS = [
+      // Matches installed ModelSelect searchRow/search rules; native Input, not plugin boxed field.
+      '.dssm-effective-search-row{flex-shrink:0;margin:2px 0 3px;position:relative}',
+      '.dssm-effective-search-row .dssm-effective-search{border-radius:var(--dsw-radius-md);background:transparent;border:0 solid transparent;height:auto;padding:5px 7px;display:flex;box-shadow:none}',
+      '.dssm-effective-search-row .dssm-effective-search:focus-within{border-color:transparent;box-shadow:none}',
+      '.dssm-effective-search-row .dssm-effective-search input{padding:0;font-size:12px;line-height:normal}',
+      '.dssm-effective-search-row .dssm-effective-search input::placeholder{color:var(--dsw-alias-label-caption)}',
       '.dssm-chip{display:inline-flex;min-width:0}',
       '.dssm-chip-trigger{border-radius:var(--dsw-radius-sm);min-width:0;max-width:220px;height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;outline:none;align-items:center;gap:4px;padding:0 4px 0 8px;font-size:13px;font-weight:500;line-height:20px;display:inline-flex;font-family:inherit}',
       '.dssm-chip-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}',
@@ -1603,99 +1626,137 @@ import { setupSidebarEntry, sidebarLocales, sidebarEntryCss, SIDEBAR_PANEL_ID } 
       '.dssm-chip-chevron.is-open{transform:rotate(180deg)}',
       '.dssm-modal.dssm-modal-manager{width:min(960px,94vw)!important;max-height:min(88vh,860px)!important}',
       '.dssm-modal-manager .dssm-modal-content{min-height:0}',
+      '.dssm-modal.dssm-modal-skill-preview{width:min(760px,94vw)!important;max-height:88vh!important}',
+      '.dssm-modal-skill-preview textarea{box-sizing:border-box;width:100%;font-family:var(--ds-font-family-code);font-size:13px;line-height:20px;resize:vertical}',
       '@container (width<=460px){.dssm-chip-trigger:has(.dssm-chip-icon) .dssm-chip-label{display:none}}',
     ].join('');
     function LoadoutChip(props: {t?: Translate; sessionId?: string}) {
-      var t = resolveT(props && props.t);
-      var sessionId = props && typeof props.sessionId === "string" ? props.sessionId : "";
-      var snapshotState = react.useState<{ loading: boolean; error: string | null; view: ApiRoutes["/session-loadout"] | null; loadouts: Loadout[] }>({ loading: true, error: null, view: null, loadouts: [] });
-      var snapshot = snapshotState[0], setSnapshot = snapshotState[1];
-      var openState = react.useState(false), open = openState[0], setOpen = openState[1];
-      var managerState = react.useState(false), managerOpen = managerState[0], setManagerOpen = managerState[1];
-      var noticeState = react.useState<string | null>(null), notice = noticeState[0], setNotice = noticeState[1];
-      var liveRef = react.useRef(true);
-      var api = dockApiForSession(sessionId);
-
+      const t = resolveT(props.t), sessionId = props.sessionId || '';
+      const [snapshot, setSnapshot] = react.useState<{sessionId:string;loading:boolean;error:string|null;view:ApiRoutes['/session-loadout']|null;loadouts:Loadout[]}>({sessionId,loading:true,error:null,view:null,loadouts:[]});
+      const [open, setOpen] = react.useState(false);
+      const [browseEffective,setBrowseEffective] = react.useState(false);
+      const [effectiveQuery,setEffectiveQuery] = react.useState('');
+      type Preview = {sessionId:string;ref:{root:string;name:string};label:string;loading:boolean;error:string|null;detail:Detail|null};
+      const [preview,setPreview] = react.useState<Preview|null>(null);
+      const previewRequest = react.useRef(0);
+      const previewTarget = react.useRef<Preview|null>(null);
+      const [notice, setNotice] = react.useState<string | null>(null);
+      const [saving, setSaving] = react.useState(false);
+      const request = react.useRef(0), live = react.useRef(true), mutation = react.useRef(false), currentSession = react.useRef(sessionId);
+      if (currentSession.current !== sessionId) { currentSession.current = sessionId; request.current++; mutation.current = false; }
+      const api = dockApiForSession(sessionId);
+      const sameSession = () => live.current && currentSession.current === sessionId;
       function reload() {
         if (!sessionId) return Promise.resolve();
-        var viewPath = `/session-loadout?sessionId=${encodeURIComponent(sessionId)}` as `/session-loadout?${string}`;
-        return Promise.all([api(viewPath), api("/loadouts")])
-          .then(function (results) {
-            if (!liveRef.current) return;
-            var listed = results[1];
-            setSnapshot({ loading: false, error: null, view: results[0], loadouts: listed && Array.isArray(listed.loadouts) ? listed.loadouts : [] });
-          })
-          .catch(function (error) {
-            if (!liveRef.current) return;
-            setSnapshot(function (previous: { loading: boolean; error: string | null; view: ApiRoutes["/session-loadout"] | null; loadouts: Loadout[] }) {
-              return { loading: false, error: translateError(t, error), view: previous ? previous.view : null, loadouts: previous ? previous.loadouts : [] };
-            });
-          });
+        const sequence = ++request.current;
+        setSnapshot(previous => ({...previous,loading:true}));
+        return Promise.all([api(`/session-loadout?sessionId=${encodeURIComponent(sessionId)}`), api('/loadouts')]).then(([view, listed]) => {
+          if (sameSession() && sequence === request.current) setSnapshot({sessionId,loading:false,error:null,view,loadouts:listed.loadouts});
+        }).catch(error => {
+          if (sameSession() && sequence === request.current) setSnapshot(previous => ({...previous,sessionId,loading:false,error:translateError(t,error)}));
+        });
       }
-      react.useEffect(function () {
-        liveRef.current = true;
-        void reload();
-        return function () { liveRef.current = false; };
+      react.useEffect(() => {
+        live.current = true; setOpen(false); setBrowseEffective(false);setEffectiveQuery(''); setPreview(null); previewTarget.current=null; previewRequest.current++; setNotice(null); setSaving(false);
+        setSnapshot({sessionId,loading:true,error:null,view:null,loadouts:[]}); void reload();
+        const changed = () => { void reload(); };
+        window.addEventListener?.(LOADOUT_CHANGED, changed);
+        return () => { live.current = false; request.current++; previewRequest.current++; window.removeEventListener?.(LOADOUT_CHANGED, changed); };
       }, [sessionId]);
-
-      var view = snapshot.view;
-      var effective = view && view.effective ? view.effective : null;
-      var current = effective && effective.loadout ? effective.loadout : null;
-      var stored = view ? view.loadoutId : null;
-      // 覆盖值：null = 未覆盖（显示生效值）、"" = 显式不加载、id = 选中。
-      var selected = stored === null || stored === undefined ? (current ? current.id : "") : stored;
-      var caption = current ? current.name : t("loadout.dock.none");
-
+      const visible = snapshot.sessionId === sessionId ? snapshot : null;
+      const effective = visible?.view?.effective;
+      const selectedGroups = effective?.loadouts || [];
+      const selectedIds = visible?.view?.loadoutIds || [];
+      const current = selectedGroups.length === 1 ? selectedGroups[0] : null;
+      const projectMembers = (effective?.members || []).filter(member => member.projectDefault);
+      const projectId = (member: {root:string;name:string}) => '__project__:' + JSON.stringify([member.root,member.name]);
+      const caption = visible?.error ? t('loadout.readError') : !visible || visible.loading && !visible.view ? t('loading') : selectedGroups.length > 1 ? t('loadout.dock.multiple',{groups:selectedGroups.length,skills:effective?.skills.length || 0}) : current ? current.name + ' · ' + (effective?.skills.length || 0) : projectMembers.length ? t('loadout.projectCount',{count:effective?.skills.length || 0}) : t('loadout.dock.none');
       function choose(value: string) {
-        if (!sessionId || !value) return;
-        if (value === "__manage__") {
-          setOpen(false);
-          setManagerOpen(true);
+        if (!sessionId || mutation.current) return;
+        if(value==='__effective__'){setBrowseEffective(true);setEffectiveQuery('');return;}
+        if (value.startsWith('__preview__:')) { const target=previewItems.get(value); if(target) void openPreview(target); return; }
+        if (value === '__retry_read__') { void reload(); return; }
+        const projectMember = projectMembers.find(member => projectId(member) === value);
+        if (projectMember) {
+          mutation.current = true; setSaving(true); setNotice(null); request.current++;
+          const excluded = visible?.view?.excludedSkills || [];
+          const restoring = projectMember.status === 'excluded';
+          const restoreRefs = projectMember.excludedBy?.length ? projectMember.excludedBy : [projectMember];
+          const next = restoring ? excluded.filter(member => !restoreRefs.some(ref => ref.root === member.root && ref.name === member.name)) : [...excluded.filter(member => member.root !== projectMember.root || member.name !== projectMember.name), {root:projectMember.root,name:projectMember.name}];
+          api('/session-skill-exclusions',{method:'POST',headers:MUTATION_HEADERS,body:JSON.stringify({sessionId,excludedSkills:next})})
+            .then(() => {notifyLoadoutChanged();if(sameSession())return reload();})
+            .catch(error => {if(sameSession())setNotice(translateError(t,error));})
+            .finally(() => {if(sameSession()){mutation.current=false;setSaving(false);}});
           return;
         }
-        setOpen(false);
-        setNotice(null);
-        api("/session-loadout", { method: "POST", headers: MUTATION_HEADERS, body: JSON.stringify({ sessionId: sessionId, loadoutId: value === "__none__" ? "" : value }) })
-          .then(function () { if (liveRef.current) void reload(); })
-          .catch(function (error: any) { if (liveRef.current) setNotice(translateError(t, error)); });
+        if (!visible?.loadouts.some(l => l.id === value)) return;
+        mutation.current = true; setSaving(true); setNotice(null); request.current++;
+        api('/session-loadout', {method:'POST',headers:MUTATION_HEADERS,body:JSON.stringify({sessionId,loadoutIds:selectedIds.includes(value) ? selectedIds.filter(id => id !== value) : [...selectedIds,value]})})
+          .then(() => { notifyLoadoutChanged(); if (sameSession()) { return reload(); } })
+          .catch(error => { if (sameSession()) setNotice(translateError(t,error)); })
+          .finally(() => { if (sameSession()) { mutation.current = false; setSaving(false); } });
       }
-
-      var items: any[] = snapshot.loadouts.map(function (item: Loadout) {
-        return { id: item.id, label: item.name };
-      });
-      items.push({ type: "separator", id: "sep-none" });
-      items.push({ id: "__none__", label: t("loadout.dock.noLoadout") });
-      items.push({ type: "separator", id: "sep-manage" });
-      items.push({ id: "__manage__", label: t("loadout.dock.manage"), icon: uiIcon("pencil", 14) });
-
-      var anchor = h("button", {
-        type: "button",
-        className: "dssm-chip-trigger",
-        "aria-label": t("loadout.dock.label", { name: caption }),
-        title: t("loadout.dock.title"),
-        "aria-expanded": open,
-        disabled: !sessionId,
-        onClick: function () { setOpen(!open); },
-      }, [
-        h("span", { key: "icon", className: "dssm-chip-icon", "aria-hidden": "true" }, uiIcon("layers", 14)),
-        h("span", { key: "label", className: "dssm-chip-label" }, caption),
-        h("span", { key: "chev", className: "dssm-chip-chevron" + (open ? " is-open" : ""), "aria-hidden": "true" }, h((primitives as any).IconChevronDownOutlineRegular, {})),
-      ]);
-
-      var manager = managerOpen ? h(Modal, {
-        key: "manager",
-        title: t("title"),
-        closeLabel: t("btn.close"),
-        className: "dssm-modal-manager",
-        onClose: function () { setManagerOpen(false); },
-      }, h(SkillManagerSection, { t: t, useSessions: function () { return sessionId; } })) : null;
-
-      return h("div", { className: "dssm-chip", key: "loadout-chip" }, [
-        h("style", { key: "css" }, CHIP_CSS),
-        h(Menu, { key: "menu", open: open, items: items, selectedId: selected, side: "top", portal: true, onSelect: choose, onClose: function () { setOpen(false); }, anchor: anchor }),
-        notice ? h("div", { key: "notice", className: "dssm-dock-error" }, notice) : null,
-        manager,
-      ]);
+      const availableMembers = (effective?.members || []).filter(member=>member.status==='available');
+      const currentAvailable = react.useRef(availableMembers); currentAvailable.current=availableMembers;
+      const previewItems = new Map<string,{root:string;name:string;displayName:string}>();
+      function closePreview() { previewRequest.current++;previewTarget.current=null;setPreview(null); }
+      async function openPreview(member:{root:string;name:string;displayName:string}) {
+        const sequence=++previewRequest.current;
+        const target:Preview={sessionId,ref:{root:member.root,name:member.name},label:member.displayName,loading:true,error:null,detail:null};
+        previewTarget.current=target;setPreview(target);setOpen(false);
+        try {
+          const detail=await api('/detail',{method:'POST',headers:MUTATION_HEADERS,body:JSON.stringify(target.ref)});
+          if(!sameSession() || sequence!==previewRequest.current) return;
+          if(!currentAvailable.current.some(item=>item.root===member.root&&item.name===member.name)) {setPreview({...target,loading:false,error:t('loadout.dock.previewUnavailable')});return;}
+          setPreview({...target,loading:false,detail});
+        } catch(error) { if(sameSession()&&sequence===previewRequest.current) setPreview({...target,loading:false,error:translateError(t,error)}); }
+      }
+      const wrapped = (label: string) => h('span', {style:{display:'block',whiteSpace:'normal',overflowWrap:'anywhere',maxWidth:320}}, label);
+      const items: any[] = (visible?.loadouts || []).map(item => ({id:item.id,label:item.name}));
+      if(items.length) items.push({type:'separator',id:'effective-separator'});
+      const effectiveItems:any[]=[];
+      const effectiveGroups=new Map<string,{label:string;items:{id:string;name:string;disabled:boolean}[]}>();
+      const needle=effectiveQuery.trim().toLowerCase();
+      if(visible?.error) effectiveItems.push({id:'read-error',label:wrapped(t('loadout.dock.loadFailed',{error:visible.error})),disabled:true},{id:'__retry_read__',label:t('btn.refresh')});
+      else if(!visible || visible.loading&&!visible.view) effectiveItems.push({id:'loading',label:t('loading'),disabled:true});
+      else {
+        (effective?.skills || []).forEach(name=>{
+          // Never guess the source by list index or by a shadowed alias.
+          const canonicalName=(value:string)=>/[^\x00-\x7F]/.test(value)?value:value.trim().replace(/([a-z0-9])([A-Z])/g,'$1-$2').toLowerCase().replace(/[\s_.]+/g,'-').replace(/[^a-z0-9-]/g,'-').replace(/-+/g,'-').replace(/^-+|-+$/g,'');
+          const matches=availableMembers.filter(item=>canonicalName(item.displayName)===name || item.displayName===name);
+          // Ambiguous mappings are deliberately not previewable; never open a different skill.
+          const member=matches.length===1?matches[0]:matches.length===0?availableMembers.find(item=>item.name===name):undefined;
+          const id='__preview__:'+JSON.stringify(member?[member.root,member.name]:[name]);
+          if(member) previewItems.set(id,member);
+          const project=!!(member?.projectDefault || member?.root.startsWith('project-'));
+          const groups=project ? [{key:'project',label:t('loadout.dock.projectSkills')}] : selectedGroups.filter(group=>member?.loadoutIds?.includes(group.id)).map(group=>({key:'loadout:'+group.id,label:group.name}));
+          if(!groups.length)groups.push({key:'other',label:t('loadout.dock.otherSkills')});
+          for(const group of groups){
+            if(needle&&!`${name} ${group.label}`.toLowerCase().includes(needle))continue;
+            if(!effectiveGroups.has(group.key))effectiveGroups.set(group.key,{label:group.label,items:[]});
+            const entries=effectiveGroups.get(group.key)!.items;
+            // A shared skill appears once in each contributing group, with the same canonical preview reference.
+            if(!entries.some(item=>item.id===id))entries.push({id,name,disabled:!member});
+          }
+        });
+        if(effective?.skills.length&&!effectiveGroups.size)effectiveItems.push({id:'no-match',label:t('empty.search'),disabled:true});
+        if(!effective?.skills.length) effectiveItems.push({id:'empty',label:t('loadout.dock.noSkills'),disabled:true});
+        (effective?.members || []).filter(member=>member.status!=='available').forEach((member,index)=>effectiveItems.push({id:'issue-'+index,label:wrapped(member.displayName+' · '+t('loadout.'+member.status)+(member.reason?' — '+member.reason:'')),disabled:true}));
+      }
+      items.push({id:'__effective__',label:h('span',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16}},t('loadout.dock.showEffective',{count:effective?.skills.length||0}),h('span',{'aria-hidden':true},'›'))});
+      if(projectMembers.length) items.push({id:'__projects__',label:t('loadout.project'),submenu:projectMembers.map(member=>({id:projectId(member),label:wrapped(member.displayName+(member.status!=='available'?' · '+t('loadout.'+member.status):'')),disabled:saving}))});
+      if(notice) items.push({id:'mutation-error',label:wrapped(notice),disabled:true});
+      const anchor = h('button', {type:'button',className:'dssm-chip-trigger','aria-label':t('loadout.dock.label'),title:t('loadout.dock.title'),'aria-expanded':open,disabled:!sessionId,'aria-busy':saving,onClick:() => { if (!open) {void reload();setBrowseEffective(false);setEffectiveQuery('');} setOpen(!open); }},
+        h('span',{className:'dssm-chip-icon','aria-hidden':true},h('svg',{viewBox:'0 0 16 16',width:14,height:14,fill:'currentColor',dangerouslySetInnerHTML:{__html:SKILL_PATHS}})), h('span',{className:'dssm-chip-label'},caption), h('span',{className:'dssm-chip-chevron'+(open?' is-open':''),'aria-hidden':true},h((primitives as any).IconChevronDownOutlineRegular,{})));
+      return h('div',{className:'dssm-chip'},h('style',null,CHIP_CSS),
+        h(Menu,{open,items:browseEffective?effectiveItems:items,...({selectedIds:browseEffective?[]:[...selectedIds,...projectMembers.filter(member => member.status !== 'excluded').map(projectId)]} as any),side:'top',portal:true,onSelect:choose,onClose:() => setOpen(false),anchor},
+          browseEffective ? h('div',null,
+            h('div',{className:'dssm-effective-search-row'},h((primitives as any).Input,{className:'dssm-effective-search',type:'text',role:'searchbox',value:effectiveQuery,'aria-label':t('loadout.dock.searchEffective'),placeholder:t('loadout.dock.searchEffective'),onChange:(event:React.ChangeEvent<HTMLInputElement>)=>setEffectiveQuery(event.target.value),onKeyDown:(event:React.KeyboardEvent)=>{if(event.key!=='Escape'&&event.key!=='ArrowDown'&&event.key!=='ArrowUp')event.stopPropagation();}})),
+            ...[...effectiveGroups.entries()].map(([key,group])=>h((primitives as any).MenuGroup,{key,label:group.label},...group.items.map(item=>h((primitives as any).MenuItemButton,{key:item.id,disabled:item.disabled,onSelect:()=>choose(item.id)},item.name))))) : null),
+        notice ? h('span',{className:'dssm-dock-error',role:'alert'},notice) : null,
+        preview && preview.sessionId===sessionId ? h(Modal,{className:'dssm-modal-skill-preview',title:t('loadout.dock.preview')+' · '+preview.label,closeLabel:t('btn.close'),onClose:closePreview},
+          preview.loading ? h('p',{role:'status'},t('loading')) : preview.error ? h('div',null,h('p',{role:'alert'},preview.error),hostButton(t('btn.refresh'),()=>{const target=previewTarget.current;if(target)void openPreview({...target.ref,displayName:target.label});},'outline')) : preview.detail ? h('div',null,
+            h('p',null,preview.detail.description),h('p',{className:'dssm-help'},preview.detail.path),h(Input.TextArea,{'aria-label':t('detail.body'),className:'dssm-detail-body',readOnly:true,rows:16,value:preview.detail.body||''})) : null) : null);
     }
 
     // 目录选择：桌面端由 preload 暴露系统文件夹对话框；Web/远程端退到工作区 UI 的选择器。

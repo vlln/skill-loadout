@@ -35,7 +35,7 @@ const KEBAB_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // 项目来源集中定义，路径校验、策略身份和展示共用，避免新增目录只可见却不可加载。
 // 两种作用域共用 Agent 顺序；兼容目录紧跟主目录，不扫描项目根的普通资源目录。
 const EXTERNAL_SOURCE_ORDER = [
-  "ccswitch", "codex", "claude", "gemini", "opencode", "cursor", "copilot",
+  "ccswitch", "codex", "codexSystem", "claude", "gemini", "opencode", "cursor", "copilot",
   "windsurf", "windsurf-user", "trae", "trae-cn", "openclaw", "clawdbot",
   "roo", "codebuddy", "workbuddy", "qoder", "qoder-cn", "lingma", "antigravity",
 ];
@@ -176,7 +176,7 @@ export function userRoots(): SkillRoot[] {
     {
       key: "codex",
       path: join(
-        process.env.DSH_CODEX_HOME || join(homedir(), ".codex"),
+        process.env.DSH_CODEX_HOME || process.env.CODEX_HOME || join(homedir(), ".codex"),
         "skills",
       ),
       label: "Codex",
@@ -187,7 +187,7 @@ export function userRoots(): SkillRoot[] {
     {
       key: "claude",
       path: join(
-        process.env.DSH_CLAUDE_HOME || join(homedir(), ".claude"),
+        process.env.DSH_CLAUDE_HOME || process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"),
         "skills",
       ),
       label: "Claude Code",
@@ -382,6 +382,15 @@ export function userRoots(): SkillRoot[] {
     root.defaultPath = root.path;
     root.path = override;
   }
+  // 指定内置目录是独立只读根，不放开通用隐藏目录过滤；跟随最终 Codex 目录覆盖。
+  roots.push({
+    key: "codexSystem",
+    path: join(roots.find((root) => root.key === "codex")!.path, ".system"),
+    label: "Codex bundled",
+    mutable: false,
+    toggleable: true,
+    native: false,
+  });
   // 用户登记的自定义来源：只读扫描，和预设外部来源同构，但目录与显示名由用户自己给。
   for (const custom of loadRootPathConfig().customSources) {
     roots.push({
@@ -640,7 +649,7 @@ const MAX_ROOT_PATH_LENGTH = 1024;
  * 只有外部只读来源允许改写目录。DSH / 公共 Agent 是宿主的扫描路径，
  * 单独改这里会出现「写进去却读不到」，要搬迁请用 DSH_HOME / DSH_AGENTS_HOME。
  */
-const OVERRIDABLE_ROOT_KEYS = new Set(EXTERNAL_SOURCE_ORDER);
+const OVERRIDABLE_ROOT_KEYS = new Set(EXTERNAL_SOURCE_ORDER.filter((key) => key !== "codexSystem"));
 
 interface CustomSourceConfig {
   id: string;
@@ -2077,7 +2086,7 @@ function defaultManagerState(): ManagerState {
     disabledSkills[root.key] = [];
     enabledSkills[root.key] = [];
   }
-  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: Object.create(null), categoryMembers: Object.create(null), categoryOrder: Object.create(null), customNotes: Object.create(null), loadouts: [], activeLoadout: Object.create(null), sessionLoadouts: Object.create(null), gatekeeper: true };
+  return { version: 1, sources, disabledSkills, enabledSkills, sidebarEntry: false, onlineUpdate: true, categories: Object.create(null), categoryMembers: Object.create(null), categoryOrder: Object.create(null), customNotes: Object.create(null), loadouts: [], activeLoadout: Object.create(null), sessionLoadouts: Object.create(null), defaultLoadoutIds: [], gatekeeper: true };
 }
 
 function validStateSkillName(name: unknown): name is string {
@@ -2158,16 +2167,17 @@ function validSessionId(value: unknown): value is string {
 }
 
 /**
- * sessionLoadouts 段：值是 loadout id，或 ""（显式不加载）。
- * 与 activeLoadout 一样按严格形状整段校验；键（sessionId）本身不卡字符集，
+ * sessionLoadouts 段：新值是 id 数组，兼容旧 id 字符串或空串。
+ * 对数组元素严格校验；键（sessionId）本身不卡字符集，
  * 非法会话键由 normalizeSessionLoadouts 逐项丢弃 = 「视为未选」。
  */
 function validSessionLoadouts(value: unknown) {
   if (value === undefined) return true;
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  for (const id of Object.values(value)) {
-    if (typeof id !== "string") return false;
-    if (id !== "" && !LOADOUT_ID_RE.test(id)) return false;
+  for (const selection of Object.values(value)) {
+    if (typeof selection === "string") {
+      if (selection !== "" && !LOADOUT_ID_RE.test(selection)) return false;
+    } else if (!Array.isArray(selection) || selection.some((id) => typeof id !== "string" || !LOADOUT_ID_RE.test(id))) return false;
   }
   return true;
 }
@@ -2180,42 +2190,16 @@ function validManagerStateDocument(value: ManagerState) {
     value.version !== 1
   )
     return false;
-  if (
-    !value.sources ||
-    typeof value.sources !== "object" ||
-    Array.isArray(value.sources)
-  )
-    return false;
-  if (
-    !validPolicyLists(value.disabledSkills) ||
-    !validPolicyLists(value.enabledSkills, true)
-  )
-    return false;
+  // Legacy loading-policy fields are opaque, read-only migration data. Their
+  // values (even conflicting old overrides) cannot affect session loading.
   if (value.sidebarEntry !== undefined && typeof value.sidebarEntry !== "boolean") return false;
   if (value.onlineUpdate !== undefined && typeof value.onlineUpdate !== "boolean") return false;
-  if (value.gatekeeper !== undefined && typeof value.gatekeeper !== "boolean") return false;
-  for (const root of userRoots()) {
-    if (root.key === "dsh") {
-      if (value.sources.dsh !== undefined && typeof value.sources.dsh !== "boolean") return false;
-      continue;
+  if (value.defaultLoadoutIds !== undefined && (!Array.isArray(value.defaultLoadoutIds) || value.defaultLoadoutIds.some((id) => typeof id !== 'string' || !LOADOUT_ID_RE.test(id)))) return false;
+  if (value.sessionExcludedSkills !== undefined) {
+    if (!value.sessionExcludedSkills || typeof value.sessionExcludedSkills !== "object" || Array.isArray(value.sessionExcludedSkills)) return false;
+    for (const [sessionId, members] of Object.entries(value.sessionExcludedSkills)) {
+      if (!validSessionId(sessionId) || !Array.isArray(members) || members.some((member) => !validMemberReference(member))) return false;
     }
-    if (typeof value.sources[root.key] !== "boolean") return false;
-    const list = value.disabledSkills[root.key];
-    if (!Array.isArray(list) || list.some((name) => !validStateSkillName(name)))
-      return false;
-  }
-  // 项目来源键允许缺省（默认开启），但显式值必须与全局来源一样严格校验。
-  for (const [key, flag] of Object.entries(value.sources)) {
-    if (PROJECT_ROOT_KEY_RE.test(key) && typeof flag !== "boolean") return false;
-  }
-  const enabledSkills = value.enabledSkills || {};
-  for (const key of new Set([
-    ...Object.keys(value.disabledSkills),
-    ...Object.keys(enabledSkills),
-  ])) {
-    const disabled = new Set(value.disabledSkills[key] || []);
-    if ((enabledSkills[key] || []).some((name) => disabled.has(name)))
-      return false;
   }
   if (value.customNotes !== undefined) {
     if (!value.customNotes || typeof value.customNotes !== "object" || Array.isArray(value.customNotes)) return false;
@@ -2281,47 +2265,19 @@ function normalizeManagerState(value: ManagerState) {
   if (typeof value.gatekeeper === "boolean") {
     normalized.gatekeeper = value.gatekeeper;
   }
-  for (const root of userRoots()) {
-    if (
-      value.sources &&
-      typeof value.sources[root.key] === "boolean"
-    )
-      normalized.sources[root.key] = value.sources[root.key];
-    const list = value.disabledSkills && value.disabledSkills[root.key];
-    if (Array.isArray(list))
-      normalized.disabledSkills[root.key] = [
-        ...new Set(list.filter((name) => validStateSkillName(name))),
-      ].sort();
-    const enabled = value.enabledSkills && value.enabledSkills[root.key];
-    if (Array.isArray(enabled))
-      normalized.enabledSkills[root.key] = [
-        ...new Set(enabled.filter((name) => validStateSkillName(name))),
-      ].sort();
-  }
-  if (value.sources && typeof value.sources === "object" && !Array.isArray(value.sources)) {
-    for (const [key, flag] of Object.entries(value.sources)) {
-      if (PROJECT_ROOT_KEY_RE.test(key) && !key.startsWith("project-dsh:") && typeof flag === "boolean")
-        normalized.sources[key] = flag;
-    }
-  }
-  for (const field of ["disabledSkills", "enabledSkills"] as const) {
-    const source = value[field];
-    if (source && typeof source === "object" && !Array.isArray(source)) {
-      for (const [key, list] of Object.entries(source)) {
-        if (!PROJECT_ROOT_KEY_RE.test(key) || !Array.isArray(list)) continue;
-        normalized[field][key] = [
-          ...new Set(list.filter(validStateSkillName)),
-        ].sort();
-      }
-    }
+  for (const field of ["sources", "disabledSkills", "enabledSkills", "activeLoadout", "gatekeeper", "disabledRoots"] as const) {
+    if (Object.prototype.hasOwnProperty.call(value, field))
+      (normalized as unknown as Record<string, unknown>)[field] = structuredClone((value as unknown as Record<string, unknown>)[field]);
   }
   normalized.categories = normalizeCategories(value.categories);
   normalized.categoryMembers = normalizeCategoryMembers(value.categoryMembers, normalized.categories);
   normalized.categoryOrder = normalizeCategoryOrder(value.categoryOrder, normalized.categories);
   normalized.customNotes = normalizeCustomNotes(value.customNotes);
   normalized.loadouts = normalizeLoadouts(value.loadouts);
-  normalized.activeLoadout = normalizeActiveLoadout(value.activeLoadout, normalized.loadouts);
+
+  normalized.defaultLoadoutIds = [...new Set((value.defaultLoadoutIds || []).filter((id) => normalized.loadouts!.some((loadout) => loadout.id === id)))];
   normalized.sessionLoadouts = normalizeSessionLoadouts(value.sessionLoadouts, normalized.loadouts);
+  normalized.sessionExcludedSkills = structuredClone(value.sessionExcludedSkills || {});
   return normalized;
 }
 
@@ -2439,14 +2395,14 @@ function normalizeActiveLoadout(value: ManagerState["activeLoadout"] | undefined
   return active;
 }
 
-/** 会话覆盖逐项清洗：sessionId 非法或引用的编组不存在 → 视为未选（回落到 scope），"" 保留为显式不加载。 */
+/** Preserve well-shaped selections, including dangling ids; the resolver treats them as none. */
 function normalizeSessionLoadouts(value: ManagerState["sessionLoadouts"] | undefined, loadouts: Loadout[]) {
   const overrides: NonNullable<ManagerState["sessionLoadouts"]> = Object.create(null);
   if (!value || typeof value !== "object" || Array.isArray(value)) return overrides;
-  const known = new Set(loadouts.map((item) => item.id));
   for (const [session, id] of Object.entries(value)) {
-    if (!validSessionId(session) || typeof id !== "string") continue;
-    if (id === "" || known.has(id)) overrides[session] = id;
+    if (!validSessionId(session)) continue;
+    if (typeof id === "string" && (id === "" || LOADOUT_ID_RE.test(id))) overrides[session] = id;
+    else if (Array.isArray(id) && id.every((item) => typeof item === "string" && LOADOUT_ID_RE.test(item))) overrides[session] = [...new Set(id)];
   }
   return overrides;
 }
@@ -2455,12 +2411,13 @@ export async function readManagerState(): Promise<PolicyResult> {
   try {
     const raw = await fs.readFile(managerStatePath(), "utf8");
     // 旧版状态迁移与下方 schema 校验仍是磁盘数据的信任边界。
-    const parsed = migrateManagerStateDocument(JSON.parse(raw) as ManagerState);
-    if (!validManagerStateDocument(parsed))
+    const parsed = JSON.parse(raw) as ManagerState;
+    const validation = migrateManagerStateDocument(structuredClone(parsed));
+    if (!validManagerStateDocument(validation))
       throw codedError("invalid manager state schema", "error.state.invalid");
     // loadout 段独立于整体 schema：坏数据只丢弃该段并记 warning，不把整个状态打入只读。
     const loadoutWarning: Diagnostic | null =
-      validLoadouts(parsed.loadouts) && validActiveLoadout(parsed.activeLoadout) && validSessionLoadouts(parsed.sessionLoadouts)
+      validLoadouts(parsed.loadouts) && validSessionLoadouts(parsed.sessionLoadouts)
         ? null
         : {
             code: "warning.loadout.invalid",
@@ -2495,21 +2452,6 @@ async function writeManagerState(value: ManagerState) {
   );
 }
 
-function managerSkillOverride(policy: ManagerState, rootKey: string, name: string, policyAliases: {rootKey: string; name: string}[] = []) {
-  if ((policy.enabledSkills[rootKey] || []).includes(name)) return true;
-  if ((policy.disabledSkills[rootKey] || []).includes(name)) return false;
-  let inheritedEnable = false;
-  for (const alias of policyAliases) {
-    if (alias.rootKey === rootKey && alias.name === name) continue;
-    if ((policy.disabledSkills[alias.rootKey] || []).includes(alias.name))
-      return false;
-    if ((policy.enabledSkills[alias.rootKey] || []).includes(alias.name))
-      inheritedEnable = true;
-  }
-  if (inheritedEnable) return true;
-  return undefined;
-}
-
 /** 解析某作用域当前应用的 loadout；scopeKey 取法沿用 loadoutScopeKey（"user" 或 "project:<identity,...>"）。 */
 export function resolveActiveLoadout(state: ManagerState, scopeKey: string): Loadout | null {
   const key = typeof scopeKey === "string" && scopeKey ? scopeKey : "user";
@@ -2521,105 +2463,116 @@ export function resolveActiveLoadout(state: ManagerState, scopeKey: string): Loa
   return loadouts.find((item) => item.id === id) || null;
 }
 
-/**
- * 会话级编组解析结果。`source` 说明生效编组从哪来：
- * - "session"：会话覆盖命中了一个存在的编组；
- * - "scope"：会话没有覆盖（或覆盖悬空），回落到 scope 的 activeLoadout；
- * - "none"：什么都不加载（无任何编组，或会话显式选了「不加载」）。
- */
+/** Session-only resolution. Singular fields are never a shorthand for the first selected group. */
 export interface EffectiveLoadout {
     loadout: Loadout | null;
-    source: "session" | "scope" | "none";
-    /** 生效编组的 id；没有生效编组时为 null。 */
+    loadouts: Loadout[];
+    source: "session" | "none";
     loadoutId: string | null;
-    /** 会话显式选择了「不加载」（sessionLoadouts[sessionId] === ""）。 */
+    loadoutIds: string[];
     explicitNone: boolean;
 }
 
-/** 会话存储的原始覆盖值：undefined 表示没有覆盖（回落 scope），"" 表示显式不加载。 */
-export function storedSessionLoadout(state: ManagerState, sessionId: string | null | undefined): string | undefined {
-  if (!validSessionId(sessionId)) return undefined;
-  const overrides = state.sessionLoadouts;
-  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return undefined;
-  return Object.prototype.hasOwnProperty.call(overrides, sessionId) ? overrides[sessionId] : undefined;
+/** Normalize old scalar values without writing migration data. */
+export function storedSessionLoadouts(state: ManagerState, sessionId: string | null | undefined): string[] {
+  if (!validSessionId(sessionId)) return [];
+  const selections = state.sessionLoadouts;
+  if (!selections || typeof selections !== "object" || !Object.prototype.hasOwnProperty.call(selections, sessionId)) return [];
+  const stored = selections[sessionId];
+  if (typeof stored === "string") return stored && LOADOUT_ID_RE.test(stored) ? [stored] : [];
+  return Array.isArray(stored) ? [...new Set(stored.filter((id) => typeof id === "string" && LOADOUT_ID_RE.test(id)))] : [];
 }
 
-/**
- * 生效顺序：sessionLoadouts[sessionId] → activeLoadout[scopeKey] → 空（什么都不加载）。
- * 会话 id 非法、覆盖悬空或覆盖了不存在的编组都视为未选，回落到 scope。
- */
+/** Compatibility accessor: returns a value only for a single stored selection. */
+export function storedSessionLoadout(state: ManagerState, sessionId: string | null | undefined): string | undefined {
+  const ids = storedSessionLoadouts(state, sessionId);
+  return ids.length === 1 ? ids[0] : undefined;
+}
+
+/** Only explicit session selections activate groups; missing/deleted ids do not inherit defaults. */
 export function resolveEffectiveLoadout(state: ManagerState, scopeKey: string, sessionId?: string | null): EffectiveLoadout {
-  const stored = storedSessionLoadout(state, sessionId);
-  if (stored !== undefined) {
-    if (stored === "") return { loadout: null, source: "none", loadoutId: null, explicitNone: true };
-    const loadouts = Array.isArray(state.loadouts) ? state.loadouts : [];
-    const loadout = loadouts.find((item) => item.id === stored);
-    if (loadout) return { loadout, source: "session", loadoutId: loadout.id, explicitNone: false };
-  }
-  const active = resolveActiveLoadout(state, scopeKey);
-  if (active) return { loadout: active, source: "scope", loadoutId: active.id, explicitNone: false };
-  return { loadout: null, source: "none", loadoutId: null, explicitNone: false };
+  const ids = storedSessionLoadouts(state, sessionId);
+  const definitions = Array.isArray(state.loadouts) ? state.loadouts : [];
+  const loadouts = ids.flatMap((id) => {
+    const loadout = definitions.find((item) => item.id === id);
+    return loadout ? [loadout] : [];
+  });
+  const loadout = loadouts.length === 1 ? loadouts[0] : null;
+  return { loadouts, loadout, loadoutIds: loadouts.map((item) => item.id), loadoutId: loadout?.id || null,
+    source: loadouts.length ? "session" : "none", explicitNone: validSessionId(sessionId) && !ids.length &&
+      Object.prototype.hasOwnProperty.call(state.sessionLoadouts || {}, sessionId) };
 }
 
 /** 成员资格按"去重后任一副本"判定：成员引用可以指向被去重隐藏的副本（policyAliases）。 */
 function gatekeeperMember(active: Loadout | null, root: SkillRoot, entry: SkillEntry) {
   if (!active) return false;
   for (const member of active.members) {
+    if (PROJECT_ROOT_KEY_RE.test(member.root)) continue; // Historical project refs are inert.
     if (member.root === root.key && member.name === entry.name) return true;
     if ((entry.policyAliases || []).some((alias) => alias.rootKey === member.root && alias.name === member.name)) return true;
   }
   return false;
 }
 
-/**
- * 单技能生效判定。判定顺序（不可写状态、来源停用等硬条件照旧优先）：
- * 1. 手动排除（override === false）→ 禁用；
- * 2. 手动引用（override === true）→ 启用；
- * 3. 守门人开 → 仅当前会话/作用域生效编组的成员启用，其余禁用（gated，没有编组时全不加载）；
- *    会话覆盖（sessionId）优先于 scope 的 activeLoadout；
- * 4. 守门人关 → 现状（默认启用），会话覆盖不参与判定。
- */
+function validMemberReference(member: unknown): member is LoadoutMember {
+  if (!member || typeof member !== "object" || Array.isArray(member)) return false;
+  const ref = member as LoadoutMember;
+  return typeof ref.root === "string" && ref.root.length > 0 && validStateSkillName(ref.name);
+}
+
+export function sessionExcludedSkills(state: ManagerState, sessionId?: string | null): LoadoutMember[] {
+  return validSessionId(sessionId) && Array.isArray(state.sessionExcludedSkills?.[sessionId])
+    ? state.sessionExcludedSkills![sessionId].map((member) => ({ ...member })) : [];
+}
+
+function matchesReference(member: LoadoutMember, root: SkillRoot, entry: SkillEntry) {
+  return (member.root === root.key && member.name === entry.name) ||
+    (entry.policyAliases || []).some((alias) => alias.rootKey === member.root && alias.name === member.name);
+}
+
+function projectDefault(root: SkillRoot, entry: SkillEntry) {
+  return root.scope === "project" || (entry.policyAliases || []).some((alias) => PROJECT_ROOT_KEY_RE.test(alias.rootKey));
+}
+
+/** Atomically replace exclusions; retained off-scope references survive cwd changes. */
+export async function setSessionSkillExclusions(sessionId: string, excludedSkills: unknown, log?: Log, options: ScopeOptions = {}) {
+  const session = typeof sessionId === "string" ? sessionId.trim() : "";
+  if (!validSessionId(session)) return loadoutError("error.session.invalid", "Invalid session id", { sessionId: session });
+  if (!Array.isArray(excludedSkills) || excludedSkills.some((member) => !validMemberReference(member)))
+    return loadoutError("error.proto.invalidParams", "excludedSkills must contain root/name references");
+  const current = await readManagerState();
+  if (!current.writable) return invalidManagerStateWrite();
+  const retained = sessionExcludedSkills(current.state, session);
+  const selected = resolveEffectiveLoadout(current.state, "user", session).loadouts.flatMap((loadout) => loadout.members);
+  const { items } = await providerItems({ ...options, sessionId: session }, current);
+  const next: LoadoutMember[] = [];
+  for (const member of excludedSkills as LoadoutMember[]) {
+    const known = [...retained, ...selected].some((item) => item.root === member.root && item.name === member.name) ||
+      items.some(({ root, entry }) => matchesReference(member, root, entry));
+    if (!known) return loadoutError("error.skill.notFound", "Skill is not in this session's inventory or selected groups", { name: member.name });
+    if (!next.some((item) => item.root === member.root && item.name === member.name)) next.push({ root: member.root, name: member.name });
+  }
+  current.state.sessionExcludedSkills ||= Object.create(null);
+  current.state.sessionExcludedSkills![session] = next;
+  await writeManagerState(current.state);
+  if (log) log("session-skill-exclusions", { sessionId: session, excludedSkills: next });
+  return { sessionId: session, excludedSkills: next };
+}
+
+/** Membership plus readable state and valid invocation metadata; legacy overrides are inert. */
 export function effectiveSkillPolicy(policyResult: PolicyResult, root: SkillRoot, entry: SkillEntry, scopeKey: string = "user", sessionId?: string | null): Policy {
-  const override = managerSkillOverride(
-    policyResult.state,
-    root.key,
-    entry.name,
-    entry.policyAliases,
-  );
-  const sourceEnabled =
-    root.kind === "project-dsh" ||
-    policyResult.state.sources[root.key] !== false;
-  if (policyResult.writable === false || !sourceEnabled || override === false) {
-    return {
-      override,
-      sourceEnabled,
-      modelInvocable: false,
-      userInvocable: false,
-      enabled: false,
-    };
-  }
-  if (policyResult.state.gatekeeper !== false && override !== true) {
-    const active = resolveEffectiveLoadout(policyResult.state, scopeKey, sessionId).loadout;
-    if (!gatekeeperMember(active, root, entry)) {
-      return {
-        override,
-        sourceEnabled,
-        modelInvocable: false,
-        userInvocable: false,
-        enabled: false,
-        gated: true,
-      };
-    }
-  }
-  const modelInvocable = entry.invocationPolicyValid ? entry.modelInvocable : true;
-  const userInvocable = entry.invocationPolicyValid ? entry.userInvocable : true;
-  return {
-    override,
-    sourceEnabled,
-    modelInvocable,
-    userInvocable,
-    enabled: true,
-  };
+  const active = resolveEffectiveLoadout(policyResult.state, scopeKey, sessionId).loadouts;
+  const member = (validSessionId(sessionId) && projectDefault(root, entry)) || active.some((loadout) => gatekeeperMember(loadout, root, entry));
+  const excluded = sessionExcludedSkills(policyResult.state, sessionId).some((ref) => matchesReference(ref, root, entry));
+  const safe = policyResult.writable !== false && !excluded && entry.loadable && entry.invocationPolicyValid;
+  const modelInvocable = !!(safe && member && entry.modelInvocable);
+  const userInvocable = !!(safe && member && entry.userInvocable);
+  return { sourceEnabled: true, modelInvocable, userInvocable,
+    enabled: modelInvocable || userInvocable, ...(excluded ? { excluded: true } : {}), ...(!member ? { gated: true } : {}) };
+}
+
+export function legacyPolicyError(): OperationError {
+  return { ok: false, code: "error.policy.sessionOnly", error: "Legacy loading policy is read-only. Edit a loadout and select it for a session instead." };
 }
 
 function invalidManagerStateWrite() {
@@ -2667,210 +2620,26 @@ export async function setOnlineUpdate(enabled: boolean): Promise<boolean> {
   return enabled;
 }
 
-export async function getGatekeeper(): Promise<boolean> {
-  const current = await readManagerState();
-  return current.state.gatekeeper !== false;
-}
+export async function getGatekeeper(): Promise<boolean> { return true; }
 
 export async function setGatekeeper(enabled: boolean): Promise<boolean> {
-  if (typeof enabled !== "boolean") {
-    throw codedError("gatekeeper must be a boolean", "error.proto.invalidParams");
-  }
-  const current = await readManagerState();
-  if (current.writable === false) {
-    throw codedError("manager state file is read-only", "error.state.invalid");
-  }
-  current.state.gatekeeper = enabled;
-  await writeManagerState(current.state);
-  return enabled;
+  throw Object.assign(new Error(legacyPolicyError().error), { code: "error.policy.sessionOnly", statusCode: 400 });
 }
 
 export async function setSourceEnabled(key: string, enabled: boolean, log?: Log, options: ScopeOptions = {}) {
-  let root = rootByKey(key);
-  if (!root && PROJECT_ROOT_KEY_RE.test(key) && !key.startsWith("project-dsh:"))
-    root = (await projectRoots(options.projectCwds)).find((item) => item.key === key);
-  if (!root || root.kind === 'project-dsh' || !root.toggleable)
-    return readonlyError("toggle");
-  const current = await readManagerState();
-  if (current.writable === false) return invalidManagerStateWrite();
-  current.state.sources[root.key] = enabled === true;
-  await writeManagerState(current.state);
-  if (log)
-    log(
-      enabled ? "source-enable" : "source-disable",
-      `${enabled ? "启用" : "停用"}来源 ${root.key}: ${root.path}`,
-    );
-  return { root: root.key, enabled: enabled === true };
+  return legacyPolicyError();
 }
 
-async function checkedPolicyRootDefinition(root: RootInput): Promise<SkillRoot | OperationError | null> {
-  const definition = rootDefinition(root);
-  if (!definition || !definition.toggleable) return null;
-  if (definition.scope !== "project") {
-    const canonical = rootByKey(definition.key);
-    return canonical && resolve(canonical.path) === resolve(definition.path)
-      ? canonical
-      : null;
-  }
-  const source = projectSourceDefinition(definition.kind);
-  const validProjectRoot =
-    source &&
-    PROJECT_ROOT_KEY_RE.test(definition.key) &&
-    typeof definition.projectRoot === "string" &&
-    isAbsolute(definition.projectRoot!) &&
-    definition.key ===
-      `${definition.kind}:${projectIdentity(definition.projectRoot!)}` &&
-    resolve(definition.path) ===
-      resolve(
-        join(
-          definition.projectRoot!,
-          source.directory,
-          "skills",
-        ),
-      );
-  if (!validProjectRoot) return null;
-  if (!(await projectSourceSafe(definition))) {
-    return {
-      ok: false,
-      error: `项目技能目录不安全，拒绝写入状态: ${definition.path}`,
-      code: "error.root.unsafe",
-      params: { path: definition.path },
-    };
-  }
-  return definition;
-}
-
-async function applyPolicySkillEnabled(definition: SkillRoot, name: string, enabled: boolean, state: ManagerState) {
-  const resolved = await resolveEntry(definition, name);
-  if (resolved === null) {
-    const explicitlyEnabled = new Set(state.enabledSkills[definition.key] || []);
-    if (!enabled && explicitlyEnabled.has(name)) {
-      explicitlyEnabled.delete(name);
-      state.enabledSkills[definition.key] = [...explicitlyEnabled].sort();
-      return { root: definition.key, name, enabled: false };
-    }
-    return {
-      ok: false as const,
-      error: `技能不存在: ${name}`,
-      code: "error.skill.notFound",
-      params: { name },
-    };
-  }
-  let summary;
-  try {
-    summary = entryOf(
-      name,
-      resolved.kind,
-      resolved.docPath,
-      parseSkillDoc(
-        await fs.readFile(resolved.realDocPath || resolved.docPath, "utf8"),
-      ),
-    );
-  } catch {
-    const explicitlyEnabled = new Set(state.enabledSkills[definition.key] || []);
-    if (!enabled && explicitlyEnabled.has(name)) {
-      explicitlyEnabled.delete(name);
-      state.enabledSkills[definition.key] = [...explicitlyEnabled].sort();
-      return { root: definition.key, name, enabled: false };
-    }
-    return {
-      ok: false as const,
-      error: `技能不存在: ${name}`,
-      code: "error.skill.notFound",
-      params: { name },
-    };
-  }
-  const explicitlyEnabled = new Set(state.enabledSkills[definition.key] || []);
-  const explicitlyDisabled = new Set(state.disabledSkills[definition.key] || []);
-  const isAlreadyEnabled = explicitlyEnabled.has(name);
-  const isAlreadyDisabled = explicitlyDisabled.has(name);
-
-  // 幂等保护：不可加载技能若已处于停用状态，再次请求停用直接成功
-  if (!enabled && isAlreadyDisabled) {
-    return { root: definition.key, name, enabled: false };
-  }
-
-  if (!summary.hasFrontmatter && (enabled || !isAlreadyEnabled)) {
-    return {
-      ok: false as const,
-      error: `技能缺少完整 frontmatter，无法${enabled ? "启用" : "停用"}: ${name}`,
-      code: "error.skill.noFrontmatter",
-      params: { name, action: enabled ? "enable" : "disable" },
-    };
-  }
-  if (!summary.loadable && (enabled || !isAlreadyEnabled)) {
-    return {
-      ok: false as const,
-      error: `技能结构不完整，无法${enabled ? "启用" : "停用"}: ${name}`,
-      code: "error.skill.notLoadable",
-      params: { name, action: enabled ? "enable" : "disable" },
-    };
-  }
-  const disabled = explicitlyDisabled;
-  if (enabled) {
-    disabled.delete(name);
-    explicitlyEnabled.add(name);
-  } else {
-    explicitlyEnabled.delete(name);
-    disabled.add(name);
-  }
-  state.disabledSkills[definition.key] = [...disabled].sort();
-  state.enabledSkills[definition.key] = [...explicitlyEnabled].sort();
-  return { root: definition.key, name, enabled: enabled === true };
-}
-
-async function setPolicySkillEnabled(root: RootInput, name: string, enabled: boolean, log?: Log) {
-  const definition = await checkedPolicyRootDefinition(root);
-  if (definition && definition.ok === false) return definition;
-  if (!definition) return readonlyError("toggle");
-  const current = await readManagerState();
-  if (current.writable === false) return invalidManagerStateWrite();
-  const result = await applyPolicySkillEnabled(definition, name, enabled, current.state);
-  if (result && result.ok === false) return result;
-  await writeManagerState(current.state);
-  if (log)
-    log(
-      enabled ? "policy-enable" : "policy-disable",
-      `${enabled ? "启用" : "停用"} ${definition.key}/${name}（本地策略，源文件不变）`,
-    );
-  return result;
-}
-
-// ── 启用 / 停用（同时控制模型与 / 手动调用，非破坏）──────────────────────────
-
-/** enabled=true 恢复模型与 / 手动调用；false 同时停用两种调用入口。 */
 export async function setSkillEnabled(root: RootInput, name: string, enabled: boolean, log?: Log) {
-  return setPolicySkillEnabled(root, name, enabled, log);
+  // Repository install/restore historically called this helper after copying files.
+  // Preserve that integration without creating any loading policy. HTTP toggles reject.
+  if (enabled === true) return { name, inventoryOnly: true };
+  return legacyPolicyError();
 }
 
-/**
- * 守门人语义下的单技能开关：引用 = 写 enabledSkills override（同启用）；
- * 取消引用 = 只清 enabledSkills，不写 disabledSkills（手动排除是另一个动作）。
- */
+/** Retired manual-reference mutation. Use loadout membership instead. */
 export async function setSkillReferenced(root: RootInput, name: string, referenced: boolean, log?: Log) {
-  const definition = await checkedPolicyRootDefinition(root);
-  if (definition && definition.ok === false) return definition;
-  if (!definition) return readonlyError("toggle");
-  const current = await readManagerState();
-  if (current.writable === false) return invalidManagerStateWrite();
-  if (referenced) {
-    const result = await applyPolicySkillEnabled(definition, name, true, current.state);
-    if (result && result.ok === false) return result;
-    await writeManagerState(current.state);
-    if (log)
-      log("policy-enable", `引用 ${definition.key}/${name}（本地策略，源文件不变）`);
-    return result;
-  }
-  const listed = new Set(current.state.enabledSkills[definition.key] || []);
-  if (!listed.has(name)) {
-    return { root: definition.key, name, enabled: false };
-  }
-  listed.delete(name);
-  current.state.enabledSkills[definition.key] = [...listed].sort();
-  await writeManagerState(current.state);
-  if (log)
-    log("policy-disable", `取消引用 ${definition.key}/${name}（本地策略，源文件不变）`);
-  return { root: definition.key, name, enabled: false };
+  return legacyPolicyError();
 }
 
 function categoryError(code: string, error: string, params?: Record<string, unknown>): OperationError {
@@ -2931,7 +2700,7 @@ async function writableCategoryState(key: string, options: ScopeOptions = {}) {
 export async function createCategory(key: string, name: string, log?: Log, options: ScopeOptions = {}) {
   const ready = await writableCategoryState(key, options);
   if ("ok" in ready) return ready;
-  const label = String(name || "").trim();
+  const label = typeof name === "string" ? name.trim() : "";
   if (!label || label.length > CATEGORY_NAME_MAX)
     return categoryError("error.category.name", "分类名称不能为空，且不能超过 24 个字符");
   if (ready.state.categories[ready.rootKey].some((item) => item.name === label))
@@ -2947,7 +2716,7 @@ export async function createCategory(key: string, name: string, log?: Log, optio
 export async function renameCategory(key: string, id: string, name: string, log?: Log, options: ScopeOptions = {}) {
   const ready = await writableCategoryState(key, options);
   if ("ok" in ready) return ready;
-  const label = String(name || "").trim();
+  const label = typeof name === "string" ? name.trim() : "";
   const list = ready.state.categories[ready.rootKey];
   const category = list.find((item) => item.id === id);
   if (!category) return categoryError("error.category.notFound", "分类不存在", { id });
@@ -3055,34 +2824,7 @@ export async function moveSkillInCategory(key: string, skillName: string, catego
 }
 
 export async function setCategoryEnabled(key: string, categoryId: string, enabled: boolean, log?: Log, options: ScopeOptions = {}) {
-  const ready = await writableCategoryState(key, options);
-  if ("ok" in ready) return ready;
-  const root = ready.root;
-  if (categoryId && categoryId !== "*" && !ready.state.categories[ready.rootKey].some((item) => item.id === categoryId))
-    return categoryError("error.category.notFound", "分类不存在", { id: categoryId });
-  const scanned = (await scanEntries(root)).entries.map((entry) => entry.name);
-  const members = ready.state.categoryMembers[ready.rootKey];
-  const names = categoryId === "*"
-    ? scanned
-    : categoryId
-      ? Object.entries(members).filter(([, id]) => id === categoryId).map(([name]) => name)
-      : scanned.filter((name) => !members[name]);
-  const skipped: string[] = [];
-  const changedNames: string[] = [];
-  for (const name of names) {
-    const result = await applyPolicySkillEnabled(root, name, enabled, ready.state);
-    if (result && result.ok === false) {
-      if (result.code === "error.skill.notLoadable" || result.code === "error.skill.noFrontmatter") skipped.push(name);
-      else if (result.code !== "error.skill.notFound") return result;
-      continue;
-    }
-    changedNames.push(name);
-  }
-  if (changedNames.length) await writeManagerState(ready.state);
-  if (log)
-    for (const name of changedNames)
-      log(enabled ? "policy-enable" : "policy-disable", `${enabled ? "启用" : "停用"} ${ready.rootKey}/${name}（本地策略，源文件不变）`);
-  return { root: ready.rootKey, categoryId: categoryId || null, enabled: enabled === true, changed: changedNames.length, skipped };
+  return legacyPolicyError();
 }
 
 // ── loadout：跨来源的命名技能编组（整组启停 / 应用，不移动文件）───────────────
@@ -3096,15 +2838,11 @@ async function writableLoadoutState() {
   if (current.writable === false) return invalidManagerStateWrite();
   const state = current.state;
   const loadouts = Array.isArray(state.loadouts) ? state.loadouts : (state.loadouts = []);
-  const activeLoadout =
-    state.activeLoadout && typeof state.activeLoadout === "object" && !Array.isArray(state.activeLoadout)
-      ? state.activeLoadout
-      : (state.activeLoadout = Object.create(null));
   const sessionLoadouts =
     state.sessionLoadouts && typeof state.sessionLoadouts === "object" && !Array.isArray(state.sessionLoadouts)
       ? state.sessionLoadouts
       : (state.sessionLoadouts = Object.create(null));
-  return { state, loadouts, activeLoadout, sessionLoadouts };
+  return { state, loadouts, sessionLoadouts };
 }
 
 function findLoadout(loadouts: Loadout[], id: string) {
@@ -3137,6 +2875,7 @@ async function checkedLoadoutMember(root: unknown, name: unknown, options: Scope
   const rootKey = typeof root === "string" ? root : "";
   const definition = rootKey ? await resolvedCategoryRoot(rootKey, options) : null;
   if (!definition) return loadoutError("error.loadout.root", `技能来源不存在: ${rootKey}`, { root: rootKey });
+  if (definition.scope === 'project' || PROJECT_ROOT_KEY_RE.test(rootKey)) return loadoutError('error.loadout.globalOnly', 'Groups may contain global skills only', {root: rootKey});
   const skillName = typeof name === "string" ? name : "";
   if (!validStateSkillName(skillName))
     return loadoutError("error.skill.notFound", `技能不存在: ${skillName}`, { name: skillName });
@@ -3146,20 +2885,26 @@ async function checkedLoadoutMember(root: unknown, name: unknown, options: Scope
   return { root: definition.key, name: skillName };
 }
 
-export async function createLoadout(name: string, note?: string | null, members?: LoadoutMember[], log?: Log, options: ScopeOptions = {}) {
+export async function createLoadout(name: string, note?: string | null, members?: LoadoutMember[], log?: Log, options: ScopeOptions = {}, copyFrom?: string) {
   const ready = await writableLoadoutState();
   if ("ok" in ready) return ready;
-  const label = String(name || "").trim();
+  const label = typeof name === "string" ? name.trim() : "";
   if (!label || label.length > LOADOUT_NAME_MAX)
     return loadoutError("error.loadout.name", "编组名称不能为空，且不能超过 24 个字符");
   if (ready.loadouts.some((item) => item.name === label))
     return loadoutError("error.loadout.duplicate", `已有同名编组: ${label}`, { name: label });
-  const text = note === undefined || note === null ? "" : String(note).trim();
+  if (note !== undefined && note !== null && typeof note !== "string") return loadoutError("error.proto.invalidParams", "note must be a string or null");
+  const text = note === undefined || note === null ? "" : note.trim();
   if (text.length > LOADOUT_NOTE_MAX)
     return loadoutError("error.loadout.noteTooLong", `编组备注过长（最多 ${LOADOUT_NOTE_MAX} 个字符）`, { max: LOADOUT_NOTE_MAX });
+  if (members !== undefined && !Array.isArray(members)) return loadoutError("error.proto.invalidParams", "members must be an array");
+  const copied = copyFrom === undefined ? undefined : findLoadout(ready.loadouts, copyFrom);
+  if (copyFrom !== undefined && !copied) return loadoutError("error.loadout.notFound", "Copy source not found");
   const initial: LoadoutMember[] = [];
   for (const member of Array.isArray(members) ? members : []) {
-    const checked = await checkedLoadoutMember(member && member.root, member && member.name, options);
+    if (PROJECT_ROOT_KEY_RE.test(member?.root)) return loadoutError('error.loadout.globalOnly', 'Groups may contain global skills only', {root: member.root});
+    const existing = copied?.members.find((item) => item.root === member?.root && item.name === member?.name);
+    const checked = existing ? { ...existing } : await checkedLoadoutMember(member && member.root, member && member.name, options);
     if ("ok" in checked) return checked;
     if (!initial.some((item) => item.root === checked.root && item.name === checked.name))
       initial.push(checked);
@@ -3171,12 +2916,68 @@ export async function createLoadout(name: string, note?: string | null, members?
   return { loadout };
 }
 
+/** Validate the complete draft before mutating anything; commit with one atomic rename. */
+export async function updateLoadout(id: string, name: unknown, note: unknown, members: unknown, log?: Log, options: ScopeOptions = {}) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const current = findLoadout(ready.loadouts, id);
+  if (!current) return loadoutError("error.loadout.notFound", "Loadout not found", { id });
+  const label = typeof name === "string" ? name.trim() : "";
+  if (!label || label.length > LOADOUT_NAME_MAX) return loadoutError("error.loadout.name", "Loadout name must contain 1–24 characters");
+  if (ready.loadouts.some((item) => item.id !== id && item.name === label)) return loadoutError("error.loadout.duplicate", "Duplicate loadout name");
+  if (note !== null && note !== undefined && typeof note !== "string") return loadoutError("error.proto.invalidParams", "note must be a string or null");
+  const text = typeof note === "string" ? note.trim() : "";
+  if (text.length > LOADOUT_NOTE_MAX) return loadoutError("error.loadout.noteTooLong", "Loadout note exceeds 140 characters");
+  if (!Array.isArray(members)) return loadoutError("error.proto.invalidParams", "members must be an array");
+  const next: LoadoutMember[] = [];
+  for (const member of members) {
+    if (PROJECT_ROOT_KEY_RE.test(member?.root)) return loadoutError('error.loadout.globalOnly', 'Groups may contain global skills only', {root: member.root});
+    const retained = current.members.find((item) => item.root === member?.root && item.name === member?.name);
+    const checked = retained ? { ...retained } : await checkedLoadoutMember(member?.root, member?.name, options);
+    if ("ok" in checked) return checked;
+    if (!next.some((item) => item.root === checked.root && item.name === checked.name)) next.push(checked);
+  }
+  const loadout: Loadout = { id, name: label, note: text || null, members: next };
+  ready.state.loadouts = ready.loadouts.map((item) => item.id === id ? loadout : item);
+  await writeManagerState(ready.state);
+  if (log) log("loadout-update", { id, name: label, members: next });
+  return { loadout };
+}
+
+function legacyMigration(state: ManagerState) {
+  const manualReferences: LoadoutMember[] = [];
+  for (const [root, names] of Object.entries(state.enabledSkills || {})) {
+    if (!Array.isArray(names) || PROJECT_ROOT_KEY_RE.test(root)) continue;
+    for (const name of names) if (validStateSkillName(name) && !manualReferences.some((item) => item.root === root && item.name === name)) manualReferences.push({ root, name });
+  }
+  return { manualReferences, hasLegacyPolicy: manualReferences.length > 0 || state.gatekeeper === false ||
+    Object.keys(state.activeLoadout || {}).length > 0 || Object.values(state.sources || {}).some((enabled) => enabled === false) ||
+    Object.values(state.disabledSkills || {}).some((names) => Array.isArray(names) && names.length > 0) ||
+    Object.keys((state as unknown as { disabledRoots?: object }).disabledRoots || {}).length > 0 };
+}
+
+/** Explicit import preserves historical references, including missing sources, without selecting. */
+export async function importLegacyLoadout(name: unknown, log?: Log) {
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  const label = typeof name === "string" ? name.trim() : "";
+  if (!label || label.length > LOADOUT_NAME_MAX) return loadoutError("error.loadout.name", "Loadout name must contain 1–24 characters");
+  if (ready.loadouts.some((item) => item.name === label)) return loadoutError("error.loadout.duplicate", "Duplicate loadout name");
+  const members = legacyMigration(ready.state).manualReferences;
+  if (!members.length) return loadoutError("error.loadout.noLegacyReferences", "There are no legacy manual references to import");
+  const loadout: Loadout = { id: randomBytes(8).toString("hex"), name: label, note: null, members };
+  ready.loadouts.push(loadout);
+  await writeManagerState(ready.state);
+  if (log) log("loadout-import-legacy", { id: loadout.id, members });
+  return { loadout };
+}
+
 export async function renameLoadout(id: string, name: string, log?: Log) {
   const ready = await writableLoadoutState();
   if ("ok" in ready) return ready;
   const loadout = findLoadout(ready.loadouts, id);
   if (!loadout) return loadoutError("error.loadout.notFound", "编组不存在", { id });
-  const label = String(name || "").trim();
+  const label = typeof name === "string" ? name.trim() : "";
   if (!label || label.length > LOADOUT_NAME_MAX)
     return loadoutError("error.loadout.name", "编组名称不能为空，且不能超过 24 个字符");
   if (ready.loadouts.some((item) => item !== loadout && item.name === label))
@@ -3193,12 +2994,11 @@ export async function deleteLoadout(id: string, log?: Log) {
   const loadout = findLoadout(ready.loadouts, id);
   if (!loadout) return loadoutError("error.loadout.notFound", "编组不存在", { id });
   ready.state.loadouts = ready.loadouts.filter((item) => item.id !== id);
-  for (const [scope, active] of Object.entries(ready.activeLoadout)) {
-    if (active === id) delete ready.activeLoadout[scope];
-  }
-  // 会话覆盖也指向这个编组：删掉后按「未选」回落 scope，不留悬空引用。
-  for (const [session, selected] of Object.entries(ready.sessionLoadouts)) {
-    if (selected === id) delete ready.sessionLoadouts[session];
+  ready.state.defaultLoadoutIds = (ready.state.defaultLoadoutIds || []).filter((item) => item !== id);
+  // 删除会话选择，不继承任何旧作用域默认。
+  for (const session of Object.keys(ready.sessionLoadouts)) {
+    const ids = storedSessionLoadouts(ready.state, session);
+    if (ids.includes(id)) ready.sessionLoadouts[session] = ids.filter((item) => item !== id);
   }
   await writeManagerState(ready.state);
   if (log) log("loadout-delete", `删除编组 ${loadout.name}（${id}），技能本身不受影响`);
@@ -3252,111 +3052,19 @@ export async function removeFromLoadout(id: string, root: string, name: string, 
 }
 
 export async function setLoadoutEnabled(id: string, enabled: boolean, log?: Log, options: ScopeOptions = {}) {
-  const ready = await writableLoadoutState();
-  if ("ok" in ready) return ready;
-  const loadout = findLoadout(ready.loadouts, id);
-  if (!loadout) return loadoutError("error.loadout.notFound", "编组不存在", { id });
-  const skipped: string[] = [];
-  const changedNames: string[] = [];
-  for (const member of loadout.members) {
-    const root = await resolvedCategoryRoot(member.root, options);
-    if (!root) {
-      skipped.push(`${member.root}/${member.name}`);
-      continue;
-    }
-    const result = await applyPolicySkillEnabled(root, member.name, enabled, ready.state);
-    if (result && result.ok === false) {
-      // 悬空或不可加载的成员跳过并计入 skipped，不拖垮整组启停。
-      skipped.push(`${member.root}/${member.name}`);
-      continue;
-    }
-    changedNames.push(`${member.root}/${member.name}`);
-  }
-  if (changedNames.length) await writeManagerState(ready.state);
-  if (log)
-    for (const name of changedNames)
-      log(enabled ? "policy-enable" : "policy-disable", `${enabled ? "启用" : "停用"} ${name}（本地策略，源文件不变）`);
-  return { id, enabled: enabled === true, changed: changedNames.length, skipped };
+  return legacyPolicyError();
 }
 
 export async function applyLoadout(id: string, applyOptions: { exclusive?: boolean } = {}, log?: Log, options: ScopeOptions = {}) {
-  const ready = await writableLoadoutState();
-  if ("ok" in ready) return ready;
-  const loadout = findLoadout(ready.loadouts, id);
-  if (!loadout) return loadoutError("error.loadout.notFound", "编组不存在", { id });
-  const exclusive = applyOptions.exclusive === true;
-  const scopeKey = await loadoutScopeKey(options);
-  if (ready.state.gatekeeper !== false) {
-    // 守门人语义：应用 = 设为当前 scope 的 activeLoadout。组外技能因不是成员自动失效，
-    // 不需要逐个写 disabled 列表；已有的 disabled override 属于手动排除，保留。
-    const gatedSkipped: string[] = [];
-    let gatedApplied = 0;
-    for (const member of loadout.members) {
-      const root = await resolvedCategoryRoot(member.root, options);
-      const entry = root ? await resolveEntry(root, member.name) : null;
-      if (!entry) {
-        gatedSkipped.push(`${member.root}/${member.name}`);
-        continue;
-      }
-      gatedApplied += 1;
-    }
-    ready.activeLoadout[scopeKey] = id;
-    await writeManagerState(ready.state);
-    if (log)
-      log("loadout-apply", `应用编组 ${loadout.name}（${scopeKey}，守门人）：设为当前，成员 ${gatedApplied} 个，跳过 ${gatedSkipped.length} 个`);
-    return { id, scope: scopeKey, exclusive, applied: gatedApplied, skipped: gatedSkipped, disabledOthers: 0 };
-  }
-  const memberKeys = new Set(loadout.members.map((member) => `${member.root}/${member.name}`));
-  const skipped: string[] = [];
-  const changedNames: string[] = [];
-  let disabledOthers = 0;
-  if (exclusive) {
-    // 先快照"当前被启用的组外技能"，再逐个停用；不可加载的条目本来就不可调用，跳过。
-    const candidateRoots = [...userRoots(), ...(await projectRoots(options.projectCwds))].filter((root) => root.toggleable !== false);
-    const disabling: { root: SkillRoot; name: string }[] = [];
-    for (const root of candidateRoots) {
-      const { entries } = await scanEntries(root);
-      for (const entry of entries) {
-        if (memberKeys.has(`${root.key}/${entry.name}`)) continue;
-        if (entry.loadable === false) continue;
-        const policy = effectiveSkillPolicy({ state: ready.state, writable: true, warning: null }, root, entry, scopeKey);
-        if (policy.enabled) disabling.push({ root, name: entry.name });
-      }
-    }
-    for (const item of disabling) {
-      const result = await applyPolicySkillEnabled(item.root, item.name, false, ready.state);
-      if (result && result.ok === false) continue;
-      disabledOthers += 1;
-      changedNames.push(`${item.root.key}/${item.name}`);
-    }
-  }
-  let applied = 0;
-  for (const member of loadout.members) {
-    const root = await resolvedCategoryRoot(member.root, options);
-    if (!root) {
-      skipped.push(`${member.root}/${member.name}`);
-      continue;
-    }
-    const result = await applyPolicySkillEnabled(root, member.name, true, ready.state);
-    if (result && result.ok === false) {
-      skipped.push(`${member.root}/${member.name}`);
-      continue;
-    }
-    applied += 1;
-    changedNames.push(`${member.root}/${member.name}`);
-  }
-  ready.activeLoadout[scopeKey] = id;
-  await writeManagerState(ready.state);
-  if (log)
-    log("loadout-apply", `应用编组 ${loadout.name}（${scopeKey}${exclusive ? "，排他" : ""}）：启用 ${applied}，跳过 ${skipped.length}，停用组外 ${disabledOthers}`);
-  return { id, scope: scopeKey, exclusive, applied, skipped, disabledOthers };
+  const sessionId = sessionIdOf(options);
+  if (!sessionId) return legacyPolicyError();
+  return setSessionLoadout(sessionId, id, log);
 }
 
-/** 读某作用域当前应用的 loadout id；无记录返回 null。 */
+/** Compatibility helper: reads a session selection, never a scope default. */
 export async function currentLoadout(scope: string) {
   const current = await readManagerState();
-  const key = typeof scope === "string" && scope ? scope : "user";
-  return current.state.activeLoadout?.[key] || null;
+  return resolveEffectiveLoadout(current.state, "user", scope).loadoutId;
 }
 
 export async function listLoadouts(options: ScopeOptions = {}) {
@@ -3365,93 +3073,144 @@ export async function listLoadouts(options: ScopeOptions = {}) {
   return {
     scope: scopeKey,
     loadouts: current.state.loadouts || [],
-    active: current.state.activeLoadout?.[scopeKey] || null,
-    gatekeeper: current.state.gatekeeper !== false,
+    active: resolveEffectiveLoadout(current.state, scopeKey, sessionIdOf(options)).loadoutId,
+    activeIds: resolveEffectiveLoadout(current.state, scopeKey, sessionIdOf(options)).loadoutIds,
+    gatekeeper: true,
+    migration: legacyMigration(current.state),
   };
 }
 
-/**
- * 写会话级编组覆盖：`loadoutId` 为 `""` 表示该会话显式「不加载」；
- * `null` / `undefined` 清除覆盖（回落到 scope 的 activeLoadout）。
- * 会话 id 非法或编组不存在都拒绝，不写入坏数据。
- */
-export async function setSessionLoadout(sessionId: string, loadoutId: string | null | undefined, log?: Log) {
-  const session = typeof sessionId === "string" ? sessionId.trim() : "";
-  if (!validSessionId(session))
-    return loadoutError("error.session.invalid", `会话标识无效，无法记录会话编组: ${session}`, { sessionId: session });
-  const ready = await writableLoadoutState();
-  if ("ok" in ready) return ready;
-  if (loadoutId === undefined || loadoutId === null) {
-    delete ready.sessionLoadouts[session];
-    await writeManagerState(ready.state);
-    if (log) log("loadout-session", `会话 ${session} 清除编组覆盖（回落作用域）`);
-    return { sessionId: session, loadoutId: null, cleared: true };
-  }
-  const chosen = String(loadoutId);
-  if (chosen === "") {
-    ready.sessionLoadouts[session] = "";
-    await writeManagerState(ready.state);
-    if (log) log("loadout-session", `会话 ${session} 选择不加载任何编组`);
-    return { sessionId: session, loadoutId: "", cleared: false };
-  }
-  const loadout = findLoadout(ready.loadouts, chosen);
-  if (!loadout)
-    return loadoutError("error.loadout.notFound", "编组不存在", { id: chosen });
-  ready.sessionLoadouts[session] = chosen;
-  await writeManagerState(ready.state);
-  if (log) log("loadout-session", `会话 ${session} 使用编组 ${loadout.name}`);
-  return { sessionId: session, loadoutId: chosen, cleared: false };
+/** Independent creation defaults. Reads never initialize or modify a session. */
+export async function getDefaultLoadouts() {
+  const current = await readManagerState();
+  if (!current.writable) return invalidManagerStateWrite();
+  return { loadoutIds: current.state.defaultLoadoutIds || [] };
 }
 
-/**
- * 生效技能名：编组成员里真实存在、可加载且当前确实会加载的那些。
- * 判定复用 effectiveSkillPolicy，因此手动排除、来源停用、会话覆盖都与宿主候选一致。
- */
-async function effectiveLoadoutSkillNames(policyResult: PolicyResult, loadout: Loadout, scopeKey: string, sessionId: string | null, options: ScopeOptions) {
-  const names: string[] = [];
-  const seen = new Set<string>();
-  const scans = new Map<string, SkillEntry[]>();
-  for (const member of loadout.members) {
-    const root = await resolvedCategoryRoot(member.root, options);
-    if (!root) continue;
-    let entries = scans.get(root.key);
-    if (!entries) {
-      entries = (await scanEntries(root)).entries;
-      scans.set(root.key, entries);
-    }
-    const entry = entries.find((item) => item.name === member.name);
-    if (!entry || entry.loadable === false) continue;
-    if (!effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId).enabled) continue;
-    if (seen.has(entry.name)) continue;
-    seen.add(entry.name);
-    names.push(entry.name);
+export async function setDefaultLoadouts(loadoutIds: unknown, log?: Log) {
+  if (!Array.isArray(loadoutIds) || loadoutIds.some((id) => typeof id !== 'string' || !LOADOUT_ID_RE.test(id)))
+    return loadoutError('error.proto.invalidParams', 'loadoutIds must be an array of non-empty loadout ids');
+  const ids = [...new Set(loadoutIds as string[])];
+  const ready = await writableLoadoutState();
+  if ('ok' in ready) return ready;
+  for (const id of ids) if (!findLoadout(ready.loadouts, id)) return loadoutError('error.loadout.notFound', 'Loadout not found', {id});
+  ready.state.defaultLoadoutIds = ids;
+  await writeManagerState(ready.state);
+  if (log) log('loadout-defaults', {loadoutIds: ids});
+  return {loadoutIds: ids};
+}
+
+/** Called only by the awaited fresh-startup creation hook, never by reads or resume. */
+export async function initializeNewSessionLoadouts(sessionId: string, log?: Log) {
+  const session = typeof sessionId === 'string' ? sessionId.trim() : '';
+  if (!validSessionId(session)) return loadoutError('error.session.invalid', 'Invalid session id', {sessionId: session});
+  const ready = await writableLoadoutState();
+  if ('ok' in ready) return ready;
+  if (Object.prototype.hasOwnProperty.call(ready.sessionLoadouts, session))
+    return {sessionId: session, loadoutIds: storedSessionLoadouts(ready.state, session), initialized: false};
+  const ids = [...(ready.state.defaultLoadoutIds || [])];
+  // Persist even []: later default changes must never affect this session.
+  ready.sessionLoadouts[session] = ids;
+  await writeManagerState(ready.state);
+  if (log) log('loadout-session-initialized', {sessionId: session, loadoutIds: ids});
+  return {sessionId: session, loadoutIds: ids, initialized: true};
+}
+
+/** Validate the entire replacement before one atomic save; never partially select valid ids. */
+export async function setSessionLoadouts(sessionId: string, loadoutIds: unknown, log?: Log) {
+  const session = typeof sessionId === "string" ? sessionId.trim() : "";
+  if (!validSessionId(session)) return loadoutError("error.session.invalid", "Invalid session id", { sessionId: session });
+  if (!Array.isArray(loadoutIds) || loadoutIds.some((id) => typeof id !== "string" || !LOADOUT_ID_RE.test(id)))
+    return loadoutError("error.proto.invalidParams", "loadoutIds must be an array of non-empty loadout ids");
+  const ids = [...new Set(loadoutIds as string[])];
+  const ready = await writableLoadoutState();
+  if ("ok" in ready) return ready;
+  for (const id of ids) if (!findLoadout(ready.loadouts, id)) return loadoutError("error.loadout.notFound", "Loadout not found", { id });
+  ready.sessionLoadouts[session] = ids;
+  await writeManagerState(ready.state);
+  if (log) log("loadout-session", { sessionId: session, loadoutIds: ids });
+  return { sessionId: session, loadoutIds: ids, loadoutId: ids.length === 1 ? ids[0] : null, cleared: ids.length === 0 };
+}
+
+/** Legacy single-selection API replaces the complete set; clears persist an empty array. */
+export async function setSessionLoadout(sessionId: string, loadoutId: string | null | undefined, log?: Log) {
+  const result = await setSessionLoadouts(sessionId, loadoutId === undefined || loadoutId === null || loadoutId === "" ? [] : [loadoutId], log);
+  if ("ok" in result) return result;
+  return { sessionId: result.sessionId, loadoutId: result.loadoutId, cleared: result.cleared };
+}
+
+/** Member availability shares provider discovery and canonical winner resolution. */
+async function effectiveLoadoutMembers(policyResult: PolicyResult, loadouts: Loadout[], sessionId: string | null, options: ScopeOptions) {
+  const { items } = await providerItems({ ...options, sessionId: sessionId || undefined }, policyResult);
+  const winners = new Map([...groupLoadableSkillsByName(items)].map(([name, group]) => [name, selectSkillWinner(group)]));
+  const skills: string[] = [];
+  const members: import("./types.js").EffectiveLoadoutMember[] = [];
+  const union = new Map<string, LoadoutMember & { loadoutIds: string[]; projectDefault: boolean }>();
+  for (const loadout of loadouts) for (const member of loadout.members) {
+    if (PROJECT_ROOT_KEY_RE.test(member.root)) continue;
+    const key = JSON.stringify([member.root, member.name]);
+    const existing = union.get(key);
+    if (existing) { if (!existing.loadoutIds.includes(loadout.id)) existing.loadoutIds.push(loadout.id); }
+    else union.set(key, { ...member, loadoutIds: [loadout.id], projectDefault: false });
   }
-  return names;
+  if (sessionId) for (const { root, entry } of items) {
+    const projectRefs = [{ root: root.key, name: entry.name }, ...(entry.policyAliases || []).map((alias) => ({ root: alias.rootKey, name: alias.name }))]
+      .filter((member) => PROJECT_ROOT_KEY_RE.test(member.root));
+    for (const member of projectRefs) {
+      const key = JSON.stringify([member.root, member.name]);
+      const existing = union.get(key);
+      if (existing) existing.projectDefault = true;
+      else union.set(key, { ...member, loadoutIds: [], projectDefault: true });
+    }
+  }
+  for (const member of union.values()) {
+    const item = items.find(({ root, entry }) => (root.key === member.root && entry.name === member.name) ||
+      entry.policyAliases?.some((alias) => alias.rootKey === member.root && alias.name === member.name));
+    if (!item) {
+      members.push({ ...member, displayName: member.name, status: "missing", reason: "Skill is missing, unreadable, or outside this session's inventory" });
+      continue;
+    }
+    const name = canonicalSkillName(item);
+    const base = { ...member, displayName: item.entry.declaredName || member.name };
+    if (item.policy.excluded) {
+      members.push({ ...base, status: "excluded", reason: "Excluded for this session",
+        excludedBy: sessionExcludedSkills(policyResult.state, sessionId).filter((ref) => matchesReference(ref, item.root, item.entry)) });
+    } else if (!item.entry.loadable || !item.entry.invocationPolicyValid || !item.policy.enabled) {
+      members.push({ ...base, status: "invalid", reason: item.entry.diagnostics.map((diagnostic) => diagnostic.code).filter(Boolean).join(", ") || "Skill has no available invocation channel or manager state is unreadable" });
+    } else if (winners.get(name) !== item) {
+      const winner = winners.get(name)!;
+      members.push({ ...base, status: "shadowed", reason: `Canonical skill ${name} is provided by ${winner.root.key}/${winner.entry.name}` });
+    } else {
+      members.push({ ...base, status: "available" });
+      if (!skills.includes(name)) skills.push(name);
+    }
+  }
+  return { skills, members };
 }
 
 /**
  * 会话编组视图（composer 控件与 GET /session-loadout 的数据源）：
- * `loadoutId` 是会话存储的原始覆盖值（null = 未覆盖、"" = 显式不加载、id = 选中）；
- * `effective` 描述真正生效的编组与技能名清单。
+ * `loadoutIds` 是存在的所选编组集合；单数兼容字段仅在恰好一组时有值。
+ * `effective` 描述所选组的去重技能并集与成员贡献来源。
  */
 export async function sessionLoadoutView(sessionId: string | null | undefined, options: ScopeOptions = {}) {
   const current = await readManagerState();
   const session = validSessionId(sessionId) ? sessionId : null;
   const scopeKey = await loadoutScopeKey(options);
   const resolution = resolveEffectiveLoadout(current.state, scopeKey, session);
-  const skills = resolution.loadout
-    ? await effectiveLoadoutSkillNames(current, resolution.loadout, scopeKey, session, options)
-    : [];
-  const stored = storedSessionLoadout(current.state, session);
+  const effective = await effectiveLoadoutMembers(current, resolution.loadouts, session, options);
   return {
     sessionId: session,
     scope: scopeKey,
-    loadoutId: stored === undefined ? null : stored,
-    gatekeeper: current.state.gatekeeper !== false,
+    loadoutId: resolution.loadoutId,
+    loadoutIds: resolution.loadoutIds,
+    excludedSkills: sessionExcludedSkills(current.state, session),
+    gatekeeper: true,
     effective: {
       source: resolution.source,
       loadout: resolution.loadout,
-      skills,
+      loadouts: resolution.loadouts,
+      ...effective,
     },
   };
 }
@@ -4631,35 +4390,30 @@ export async function skillDetail(key: string, name: string, options: ScopeOptio
   };
 }
 
-/** 选择未停用（含未被守门人拦截）的最高优先级副本；全部停用时保留原生覆盖或显式禁用阻断。 */
+/** Session inventory roots: cwd is the host context, projectCwds the API context. */
+function inventoryCwds(options: ScopeOptions): string[] {
+  return typeof options.cwd === "string" ? [options.cwd] : (options.projectCwds || []);
+}
+
+/** Shared discovery, real-path deduplication and policy inputs for provider and effective view. */
+async function providerItems(options: ScopeOptions, policyResult: PolicyResult) {
+  const user = userRoots();
+  const roots = [...user, ...(await projectRoots(inventoryCwds(options)))];
+  const scans = await scanDeduplicatedRoots(roots);
+  const scopeKey = await loadoutScopeKey({ projectCwds: inventoryCwds(options) });
+  const sessionId = sessionIdOf(options);
+  const items = roots.flatMap((root) => scans.get(root.key)!.entries.map((entry) => ({
+    root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId),
+  })));
+  return { items, user, roots, scans };
+}
+
 export async function listProviderCandidates(options: ScopeOptions = {}) {
   const policyResult = await readManagerState();
   const candidates = [];
-  const user = userRoots();
-  const userScans = await scanDeduplicatedRoots(user);
-  const cwd =
-    options && typeof options.cwd === "string" ? options.cwd : undefined;
-  // 守门人按会话作用域判定：有项目 cwd 时用项目作用域键，否则用户作用域（与 loadoutScopeKey 一致）；
-  // 会话级覆盖（sessionId 来自 agent-scoped provider 或宿主注入的 scope）优先于作用域默认。
-  const scopeKey = await loadoutScopeKey({ projectCwds: cwd ? [cwd] : [] });
-  const sessionId = sessionIdOf(options);
-  const items = user.flatMap((root) =>
-    userScans.get(root.key)!.entries.map((entry) => ({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId) })),
-  );
-  if (cwd) {
-    const roots = await projectRoots([cwd]);
-    for (const root of roots) {
-      const scanned = (await scanDeduplicatedRoots([root])).get(root.key)!;
-      for (const entry of scanned.entries) items.push({ root, entry, policy: effectiveSkillPolicy(policyResult, root, entry, scopeKey, sessionId) });
-    }
-  }
+  const { items } = await providerItems(options, policyResult);
   for (const group of groupLoadableSkillsByName(items).values()) {
     const { root, entry, policy } = selectSkillWinner(group);
-    // 关闭的外部来源不覆盖其他插件；原生副本、分发链接及显式单技能禁用仍需阻断。
-    const hasNativeCopy = group.some(({ root, entry }) => root.native ||
-      entry.policyAliases?.some((alias) => user.some((item) => item.key === alias.rootKey && item.native)));
-    const hasExplicitDisable = group.some((item) => item.policy.override === false);
-    if (!hasNativeCopy && !hasExplicitDisable && !policy.sourceEnabled) continue;
     const project = root.scope === "project";
     // Shared Agent 继续由 manager 提供递归发现与链接副本，不因开放文件管理而丢失调用候选。
     const policyOnly = root.mutable && root.key !== "agents";
@@ -4669,15 +4423,8 @@ export async function listProviderCandidates(options: ScopeOptions = {}) {
       : undefined;
     // 原生根由宿主自己的 provider 提供；来源停用必须发布覆盖层，否则停用不生效。
     // 守门人拦截（gated）同理：非成员技能也要发布阻断覆盖层，否则宿主原生发现会照常加载。
-    const needsOverlay =
-      !policyOnly ||
-      group.length > 1 ||
-      policy.override !== undefined ||
-      !entry.invocationPolicyValid ||
-      policyResult.writable === false ||
-      !policy.sourceEnabled ||
-      policy.gated === true;
-    if (!needsOverlay) continue;
+    // Always publish the selected native copy too: the global, session-less layer
+    // publishes blockers and must not shadow this agent's explicit selection.
     const candidateName = canonicalSkillName({ root, entry, policy });
     if (!KEBAB_RE.test(candidateName)) continue;
     candidates.push({
@@ -4687,7 +4434,7 @@ export async function listProviderCandidates(options: ScopeOptions = {}) {
         modelInvocable: policy.modelInvocable,
         userInvocable: policy.userInvocable,
       },
-      provider: "dsh-skills-manager-external",
+      provider: "dsh-loadout-external",
       source: project
         ? root.kind
         : root.key === "dsh"
@@ -4733,13 +4480,20 @@ export async function getProviderSkill(candidate: ProviderCandidate, options: Sc
     typeof locator.realDocPath !== "string"
   )
     return undefined;
+  // Candidate caches may outlive a selection or shared definition edit. Recheck
+  // the current winner and invocation policy before returning its contents.
+  const fresh = (await listProviderCandidates(options)).find((item) => item.name === candidate.name &&
+    item.locator.rootKey === locator.rootKey && item.locator.entryName === locator.entryName &&
+    item.locator.realDocPath === locator.realDocPath);
+  if (!fresh) return undefined;
+  candidate = fresh;
   let root = rootByKey(locator.rootKey);
   if (
     !root &&
     PROJECT_ROOT_KEY_RE.test(locator.rootKey) &&
-    typeof options.cwd === "string"
+    inventoryCwds(options).length > 0
   ) {
-    root = (await projectRoots([options.cwd])).find(
+    root = (await projectRoots(inventoryCwds(options))).find(
       (item) => item.key === locator.rootKey,
     );
   }
@@ -4805,10 +4559,9 @@ function groupLoadableSkillsByName<T extends SkillItem>(items: T[]): Map<string,
   return groups;
 }
 
-// 只跳过 manager 明确停用的副本；守门人拦截（gated）同样让位给可加载的同名副本；
-// frontmatter 的分通道限制和非法策略仍按原规则失败关闭。
+// Prefer an available selected copy; otherwise retain a blocking candidate.
 function isCopyDisabled(item: SkillItem) {
-  return !item.policy.sourceEnabled || item.policy.override === false || item.policy.gated === true;
+  return !item.policy.enabled;
 }
 function selectSkillWinner<T extends SkillItem>(group: T[]): T {
   return group.find((item) => !isCopyDisabled(item)) || group[0];
@@ -4829,6 +4582,7 @@ function markWinners(items: ViewItem[]) {
           item.view.fallbackTo = { root: winner.root.key, name: winner.entry.name, scope: winner.root.scope || "user" };
         }
       } else if (item !== winner) {
+        item.view.enabled = false;
         item.view.shadowedBy = { root: winner.root.key, name: winner.entry.name };
       }
     }
@@ -4923,13 +4677,12 @@ export async function workspaceSkills(workspace: unknown, registered: unknown) {
 
 export async function state(options: ScopeOptions = {}) {
   const user = userRoots();
-  const userScans = await scanDeduplicatedRoots(user);
   const projectWarnings: Diagnostic[] = [];
   const scoped = await projectRoots(options.projectCwds, projectWarnings);
   const policyResult = await readManagerState();
+  const scans = await scanDeduplicatedRoots([...user, ...scoped]);
   const trash = await listTrash();
-  // 守门人按当前作用域判定成员资格（user 或 project:<identity,...>，与编组页签同一套取法）；
-  // 会话级覆盖（sessionId 来自请求头或 agent-scoped provider 的 Agent.id）优先于作用域默认。
+  // Inventory scope limits discovery only; membership always comes from sessionId.
   const scopeKey = await loadoutScopeKey(options);
   const sessionId = sessionIdOf(options);
   const result = {
@@ -4939,8 +4692,12 @@ export async function state(options: ScopeOptions = {}) {
     projects: [] as {root?: string; name?: string; workspaceCwds?: string[]}[],
     summary: {total: 0, enabled: 0, disabled: 0, issues: 0},
     trash,
-    // 守门人开关下发给 UI：非成员技能显示"未加载"，开关含义变为"引用"。
-    gatekeeper: policyResult.state.gatekeeper !== false,
+    // Compatibility field: session membership is always enforced.
+    gatekeeper: true,
+    migration: legacyMigration(policyResult.state),
+    active: resolveEffectiveLoadout(policyResult.state, scopeKey, sessionId).loadoutId,
+    activeIds: resolveEffectiveLoadout(policyResult.state, scopeKey, sessionId).loadoutIds,
+    scope: scopeKey,
     warnings: [
       ...(policyResult.warning ? [policyResult.warning] : []),
       ...projectWarnings,
@@ -4949,10 +4706,7 @@ export async function state(options: ScopeOptions = {}) {
   };
   const all: ViewItem[] = [];
   for (const root of [...scoped, ...user]) {
-    const { exists, entries, truncated } =
-      root.scope === "project"
-        ? (await scanDeduplicatedRoots([root])).get(root.key)!
-        : userScans.get(root.key)!;
+    const { exists, entries, truncated } = scans.get(root.key)!;
     // 即使项目 .dsh/skills 尚不存在，也要把可写根返回给创建表单；只读项目根仍按实际存在性展示。
     if (root.scope === "project" && !exists && root.kind !== "project-dsh")
       continue;
@@ -4972,10 +4726,7 @@ export async function state(options: ScopeOptions = {}) {
     const skills: SkillView[] = [];
     for (const e of entries) {
       const policy = effectiveSkillPolicy(policyResult, root, e, scopeKey, sessionId);
-      const managerEnabled =
-        policyResult.writable !== false &&
-        policy.sourceEnabled &&
-        policy.override !== false;
+      const managerEnabled = policy.enabled;
       skills.push({
         name: e.name,
         declaredName: e.declaredName,
@@ -5031,33 +4782,13 @@ export async function state(options: ScopeOptions = {}) {
         : {}),
       exists,
       truncated: truncated === true,
-      enabled:
-        policyResult.writable !== false &&
-        (root.kind === "project-dsh" ||
-          policyResult.state.sources[root.key] !== false),
+      enabled: policyResult.writable !== false,
       skills,
       categories: policyResult.state.categories[root.key] || [],
       categoryOrder: policyResult.state.categoryOrder[root.key] || {},
     });
   }
-  const userItems = all.filter((item) => item.root.scope !== "project");
-  markWinners(userItems);
-  const projectGroups = new Map<string | undefined, ViewItem[]>();
-  for (const item of all.filter(
-    (candidate) => candidate.root.scope === "project",
-  )) {
-    const group = projectGroups.get(item.root.projectRoot) || [];
-    group.push(item);
-    projectGroups.set(item.root.projectRoot, group);
-  }
-  for (const projectItems of projectGroups.values()) {
-    // 用户级条目参与该 workspace 的优先级判定，但不把其全局视图标记为“被某项目覆盖”。
-    const userCopies = userItems.map((item) => ({
-      ...item,
-      view: { ...item.view },
-    }));
-    markWinners([...projectItems, ...userCopies]);
-  }
+  markWinners(all);
   const seenProjects = new Set();
   for (const root of result.roots.filter((item) => item.scope === "project")) {
     if (seenProjects.has(root.projectRoot)) continue;
