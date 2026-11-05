@@ -1,13 +1,10 @@
 ---
 name: skill-writing
-description: >
-  当你要写、改写或审一份 Agent Skill 的文字时使用本 skill：frontmatter 字段、触发描述、正文结构、
-  references 的拆分与指路，以及证明它格式正确、规则之间不互相矛盾。给出 Agent Skills 规范的事实、
-  合格线与写法。判定：这句话删掉之后，模型会不会做错——不会，就删。
-  Use when writing or reviewing one skill's text: frontmatter, description, body, references.
+description: Agent Skill writing standards. Use when writing, revising, or reviewing a SKILL.md and its supporting references.
 license: MIT
 metadata:
   face: quality
+  domain: agent-skills
   author: vlln
   version: "2.6.0"
 ---
@@ -32,7 +29,7 @@ metadata:
 | `allowed-tools` | 否 | 空格分隔的预批准工具，实验性，各客户端支持不一 |
 
 - 渐进披露三层：启动只读 `name` + `description`（约 100 tokens/份）；激活读整个正文（建议 <5,000 tokens）；`scripts/`、`references/`、`assets/` 按需。正文建议 <500 行。
-- **`description` 会被宿主截断，长度上限不止一处**：规范上限 1024 字符；DeepSeek Harness 的会话目录默认只显示前 **500** 字符（`catalogDescriptionMaxLength`，核对 2026-10-19）。所以判定性的句子必须放在最前面，后面的内容随时可能不被读到。
+- **`description` 会被宿主截断，长度上限不止一处**：规范上限 1024 字符；DeepSeek Harness 的会话目录默认只显示前 **500** 字符（`catalogDescriptionMaxLength`，核对 2026-10-19）。优先写任务与适用时机，上限不是建议长度。
 - 文件引用用**相对 skill 根目录的路径**，层级保持一层。
 - 官方 `skills-ref validate <dir>` 只校验 frontmatter 与命名，不校验内容质量。
 - `skit validate`（0.10.0-dev，核对 2026-11-01）还校验正文长度与相对链接，**包括行内代码里形似链接的片段**：写一个图片语法示例会被当成断链报错。示例改用文字描述，或放进围栏代码块再验一次。
@@ -44,6 +41,7 @@ metadata:
 - 六个字段名照抄规范，不自造顶级字段；自定义内容一律进 `metadata`。
 - YAML 必须从文件第 0 字节开始：BOM 或前置空行会让整份 frontmatter 失效。
 - 值里含 `: ` 或 `#` 时加引号。未引号的冒号是最常见的静默失败。
+- `metadata.face` 与 `metadata.domain` 都是可选字符串。前者标主面，后者标最接近任务的粗粒度领域，如 `agent-skills`、`documentation`、`software-development`；领域用英文小写连字符标识，同一领域不用同义标签。没有明确主领域时可省略，不填 `general`。
 
 **三角色不互串**
 
@@ -55,7 +53,7 @@ metadata:
 
 **skill 仓库的 README 有两条专属判据：**
 
-- **技能表固定四列：skill 名、face、domain、简短介绍。** face 是它主要回答哪类问题（流程 / 质量 / 执行）；domain 是**最接近这个任务的一个领域**（软件开发、skills、文档、数据……）——按任务的域判，不按对象的域（给软件仓库写 README 的 skill，domain 是"文档"，不是"软件开发"）；同一仓库内同一领域逐字一致，别发明同义词。一列恒定是正常形态：domain 的价值在跨仓库归堆，不在表内区分。两列分工说死：face 管"哪类问题"，domain 管"哪个领域"，不混用。
+- **技能表固定四列：skill 名、face、domain、简短介绍。** face 是它主要回答哪类问题（流程 / 质量 / 执行）；domain 是**最接近这个任务的一个领域**（软件开发、skills、文档、数据……）——按任务的域判，不按对象的域（给软件仓库写 README 的 skill 属于文档领域）；有 metadata 标签时，表格与标签含义一致，可用中文显示名；跨领域通用的 skill 标为“通用”，不据此补写 `general` 标签。同一领域逐字一致，别发明同义词。一列恒定是正常形态：domain 的价值在跨仓库归堆，不在表内区分。两列分工说死：face 管"哪类问题"，domain 管"哪个领域"，不混用。
 - **安装方式至少给两种，覆盖三类读者**：本仓库的推荐工具（如 skit）；生态通用 CLI——`npx skills add <owner>/<repo> --skill <名>`（需 Node.js ≥ 22.20；脚本化时加 `--agent <名> -y` 跳过交互，核对 2026-11-02）；以及一段可直接发给 agent 的 prompt（让 agent 运行 `npx skills use <owner>/<repo>@<名>` 并照生成的指令执行），什么都没装的读者走这条路。
 
 **独立**
@@ -84,11 +82,20 @@ metadata:
 
 **description**
 
-- 用"当……时使用本 skill"的祈使句，写用户想达成的事，不写内部机制。
-- 顺序固定：**先写触发场景，再写能力，最后才是实现细节**。宿主可能只读前 500 字符。
-- 写满 1–3 个用户会用的名词（任务名、产物名），让匹配有落点；同义词堆叠没有用。
-- 一条描述需要 `and` 连接两件无关的工作，就是该拆的信号。
-- 近邻的区分不写进描述，交给查询集测。
+description 是**加载正文前的选择依据**，不是正文摘要。Agent 尚未读正文时，仅凭它就应能判断：当前任务是否需要这份 skill，是否应继续读取完整正文。
+
+- **统一英文，结构为“简短功能介绍 + 使用时机”。** 前半句说明这份 skill 提供哪种帮助；后半句用 `Use when ...` 指明遇到什么实际任务或需求时应使用它。
+- **功能介绍说用途，不介绍内容。** 例如“制作 Skills 的操作流程”，而不是“包含材料提取、地图、验收、发布与维护”。
+- **使用时机说何时需要，不说加载后做哪些步骤。** 例如“需要按规范流程制作 Skills 时”，而不是“用于安排制作、验收与维护流程”。
+- 保留识别任务所需的关键词；不罗列正文目录、内部方法、设计理由或判定口号，不附其他语言复述。
+- 两件无关工作无法用一个明确任务概括，是拆分信号；不要靠扩写描述掩盖。
+- 检查时先不读正文，只看 description，分别代入一条应使用的真实请求与一条不应使用的近邻请求；无法判断时修正使用时机，不堆同义词。
+
+示例：
+
+```yaml
+description: A workflow for creating Agent Skills. Use when creating skills through a structured development process.
+```
 
 **正文**
 
@@ -106,7 +113,7 @@ metadata:
 
 - **gotchas**：违反合理假设的具体事实——现象、原因、最小修法。放正文，别放深的 reference。
 - **指路句**：每个 reference 链接后跟一句"读它的时候：……"，写清在什么情形下才需要读。没有这句，模型要么全读、要么全不读。
-- **判定句**：description 末尾给一句"判定：……"，让模型在边界情形下能自己裁决该不该用、该怎么判。
+- **判定句**：确有边界判断需要时放在正文相应规则旁，不要求固定格式，也不附在 description 末尾。
 - **模板**：要固定输出格式时给具体骨架，比散文描述可靠。
 - **清单**：多步且有依赖或关口时给。
 - **校验回环**：做完跑校验，失败就修，通过才继续。
@@ -114,7 +121,7 @@ metadata:
 
 写作口径：
 
-- 只写模型不写就会做错的东西。
+- 只写模型不写就会做错的东西；删掉一句不影响正确行为，就删。
 - 默认给一个，另给一条后路；不要摆一堆等权选项。
 - 多解可用时讲理并给默认，脆弱处（精确命令、顺序、格式）钉死。
 - 一段讲一件事；判据用"必须 / 不得 / 应当"，不用"注意""确保"。

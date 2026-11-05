@@ -1,10 +1,6 @@
 ---
 name: improvement-loop
-description: >
-  当一个产物（skill、README、提示词、文档、配置）要改好几轮、而"看起来更好"不够用时使用本 skill：
-  证明这一版胜过上一版、找出哪条改动真的改变了产出、保留冠军并防止回退、决定何时停。
-  给出基线对照、可数度量、归因、夹具、冠军线与停止条件。判定：说不出"这一版改了哪一句、因此哪个数变了"，就还不能宣称变好。
-  Use when iterating an artifact over rounds and needing proof each round is better.
+description: An evidence-based iteration workflow. Use when repeatedly revising an artifact and needing to establish whether each revision improves it.
 license: MIT
 metadata:
   face: process

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-本仓库用一套面来组织 skill 的内容：`process` / `quality` / `execution`，回答"它主要回答哪个问题"。定义见 [THEORY.md](THEORY.md)，它是本仓库的唯一权威。
+本仓库用主面 `face`（`process` / `quality` / `execution`）标记职责，用可选的 `domain` 标记任务领域。定义见 [THEORY.md](THEORY.md)，它是本仓库的唯一权威。
 
 - 写任何新 skill 之前，先回答"它回答哪个问句""它替谁、在什么任务里用"。答不出来就先别写。
 - 一份 skill 只标一个主面。想标两个，说明该拆。

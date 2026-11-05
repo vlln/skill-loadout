@@ -31,7 +31,7 @@
 
 `domain` 是最接近这项任务的领域，例如“软件开发”“文档”“skills”。它和 face 是两个不同维度：**face 管哪类问题，domain 管哪个领域**，不是第四个面。
 
-例如，发布流程、代码质量、工具操作可以同属“软件开发”，却分别承担三个不同的主面；给软件仓库写 README 的 skill，任务领域则是“文档”。领域名用于介绍与归堆，不是本插件要求的必填配置。
+例如，发布流程、代码质量、工具操作可以同属“软件开发”，却分别承担三个不同的主面；给软件仓库写 README 的 skill，任务领域则是“文档”。领域可用字符串写入 `metadata.domain`，例如 `software-development`（软件开发）、`documentation`（文档）、`agent-skills`（skills）。标签用于介绍与归堆，不控制加载或组合，也不是必填配置；跨领域通用、没有主领域的 skill 可省略。
 
 ### loadout：这次任务选哪些 skill？
 
@@ -77,7 +77,7 @@ dsh plugin --profile web add "https://github.com/vlln/skill-loadout.git#path:/pl
 | [skill-writing](skills/skill-writing/SKILL.md) | `quality` | skills | 判断一份 skill 写成什么样算合格 |
 | [skill-making](skills/skill-making/SKILL.md) | `process` | skills | 从决定做到发布的流程与检查点 |
 | [skit](skills/skit/SKILL.md) | `execution` | skills | 安装、检查、导出，以及装好后怎么验 |
-| [improvement-loop](skills/improvement-loop/SKILL.md) | `process` | skills | 对比新旧版本，判断一次改进是否有效 |
+| [improvement-loop](skills/improvement-loop/SKILL.md) | `process` | 通用 | 对比新旧版本，判断一次改进是否有效 |
 
 面对一堆待整理的材料，可以先定位任务边界、再写内容、走制作流程、安装验证，后续迭代时比较新旧版本。按实际需要选用，不必一次加载五份。
 
@@ -112,7 +112,7 @@ Run `npx skills use "vlln/skill-loadout@skill-writing"` and follow the generated
 
 | 文档 | 内容 |
 |---|---|
-| [内容坐标：面](THEORY.md) | 三个主面的定义、独立与组合的原则 |
+| [内容坐标：面与领域](THEORY.md) | 主面与领域的标注、独立与组合的原则 |
 | [证据与状态](docs/status.md) | 每条结论有多少证据，哪些预测还没测过 |
 | [制作方法](docs/method.md) | 从选题到做出 loadout 的过程 |
 | [插件说明](plugin/README.md) | DSH 中的技能库、编组和会话选用 |

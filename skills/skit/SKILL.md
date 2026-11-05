@@ -1,13 +1,10 @@
 ---
 name: skit
-description: >
-  当你要用 skit 命令行安装、更新、列出、检查或导出 skill，选择从哪种来源形式安装，在干净目录验证
-  "别人照 README 能不能装上"，或者要读懂 skit validate 报的错时使用本 skill。给出存储与链接方式、
-  三种校验各查什么、装完要验什么。判定：以装好的 skit help 为准，本文的命令与行为是带日期的快照。
-  Use when installing, validating, checking, or exporting skills with the skit CLI.
+description: Skill management with the skit CLI. Use when installing, updating, validating, or exporting skills, or troubleshooting their installation.
 license: MIT
 metadata:
   face: execution
+  domain: agent-skills
   author: vlln
   version: "2.1.0"
 ---

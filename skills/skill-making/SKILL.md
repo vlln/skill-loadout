@@ -1,13 +1,10 @@
 ---
 name: skill-making
-description: >
-  当你要从零做一份 skill 或一组 skill（一个 loadout）、把一批现有材料提炼成 skill、或者要决定一份 skill
-  能不能发布与何时复查时使用本 skill。管顺序、关口与谁决定：决定做不做、提取真实材料、先画地图再拆分、
-  写、验收触发与效果、发布、维护。判定：说不出"它替谁省掉什么错"，就还不该写。
-  Use when making one skill or a set of skills from real material, through to verification and publishing.
+description: A workflow for creating Agent Skills. Use when creating skills through a structured development process.
 license: MIT
 metadata:
   face: process
+  domain: agent-skills
   author: vlln
   version: "3.0.0"
 ---
@@ -20,7 +17,7 @@ metadata:
 |---|---|---|---|
 | 0 决定 | 一句话：反复任务 + 它要挡住的几类错 | 能列出至少三类具体失败；一段常驻规则不足以替代 | 人，或人明确委托 |
 | 1 提取 | 真实步骤、纠正、输入输出、项目事实 | 规范、同类实现、真实运行三种材料都读过 | agent |
-| 2 地图 | 每份一行：主面、回答的问题、触发场景、材料落点 | 每个话题只有一个主人 | agent，交人过目 |
+| 2 地图 | 每份一行：主面、任务领域（可省略）、回答的问题、触发场景、材料落点 | 每个话题只有一个主人 | agent，交人过目 |
 | 3 写 | `SKILL.md` 与 references 初稿，冻结一份副本 | 字段与文字达到合格线 | agent |
 | 4 验收 | 校验结果、触发测试、效果对照 | 负控会失败；对照里能指出哪条规则改了哪句 | agent，异常交人 |
 | 5 发布 | 可安装的源 + README | 干净环境照 README 能装成 | **人** |
@@ -52,13 +49,13 @@ metadata:
 
 ## 2 地图：先定谁管什么，再动笔
 
-做一组时，先写一张表，每份一行：名字、主面、它主要回答的问题、触发场景、从哪些材料来。再按话题列一张归属表：每个话题（例如"新门禁要证明自己会拒绝"）只能有一个主人，其余份最多保留自己任务需要的一句应用。
+做一组时，先写一张表，每份一行：名字、主面、任务领域（可省略）、它主要回答的问题、触发场景、从哪些材料来。再按话题列一张归属表：每个话题（例如"新门禁要证明自己会拒绝"）只能有一个主人，其余份最多保留自己任务需要的一句应用。
 
 拆的信号：两个任务永远不会同时激活；描述必须用 `and` 连接两件无关工作；维护者说不清改动该落到哪一份。
 
 不是拆分信号的：两份 skill 抢同一个触发——那是描述问题，先改描述。
 
-只做一份时，这一步缩成两句：它回答哪个问题（主面），它替谁在什么任务里用（写进 `description`）。
+只做一份时，这一步缩成两句：它回答哪个问题（主面），它替谁在什么任务里用（简短写进 `description`）。有明确任务领域时，用英文小写连字符标识写入可选的 `metadata.domain`；通用或无主领域时省略。
 
 ## 3 写
 

@@ -1,14 +1,10 @@
 ---
 name: skill-atlas
-description: >
-  当你要判断一份 skill 主要回答哪个问题、两份 skill 是否重叠或能否互换、一份 skill 该不该拆，
-  或者要为一类任务配一组 skill（loadout）并检查组内有没有两份抢同一段权威时使用本 skill。
-  也用于审计一批现有 skill 在流程 / 质量 / 执行三面上的分布。
-  判定：两份 skill 会不会对同一段指令都声称拥有权威——会，就必须拆清或合并。
-  Use when placing a skill by the question it answers, checking overlap, splitting, or assembling a loadout.
+description: Skill responsibility and overlap assessment. Use when deciding how to split skills or which skills to combine for a task.
 license: MIT
 metadata:
   face: quality
+  domain: agent-skills
   author: vlln
   version: "0.4.0"
 ---
@@ -44,14 +40,19 @@ metadata:
 
 ## 标注
 
-主面写进 `metadata`，不新增顶级字段：
+主面与领域写进 `metadata`，不新增顶级字段：
 
 ```yaml
 metadata:
   face: quality      # process | quality | execution
+  domain: agent-skills
 ```
 
-标不出来，先看是不是句子太肥；拆完还分不清，按它主要服务的那个问题标。
+主面标不出来，先看是不是句子太肥；拆完还分不清，按它主要服务的那个问题标。
+
+领域按最接近任务的粗粒度领域选，不按所在仓库或对象选；给软件仓库写 README 属于 `documentation`，不是 `software-development`。使用单个英文小写连字符标识，同一领域沿用已有名称。跨域没有主领域或通用时省略，不填 `general`，不据此拆分。
+
+两项都可选，不设默认、不控制加载或组合。领域相同只是筛选线索，判断能否互换仍要读具体任务与覆盖内容。
 
 ## 四个动作
 
